@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5c518">
+  <title>Fila do Energetico</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("energy_manager_theme")||"dark";</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+
+  <main id="loginView" class="login-layout">
+    <section class="login-brand">
+      <div class="brand-mark"><i data-lucide="zap"></i></div>
+      <p class="eyebrow">Controle compartilhado</p>
+      <h1>Fila do<br>Energetico</h1>
+      <p class="login-subtitle">Compras em ordem, decisoes em conjunto.</p>
+    </section>
+    <section class="login-panel" aria-labelledby="loginTitle">
+      <div class="segmented" role="tablist">
+        <button class="segment active" data-login-tab="participante">Participante</button>
+        <button class="segment" data-login-tab="admin">Administrador</button>
+      </div>
+      <form id="participantForm" class="form-stack">
+        <div><label for="loginNome">Nome</label><input id="loginNome" autocomplete="username" required placeholder="Seu nome"></div>
+        <div><label for="loginSenha">Senha</label><input id="loginSenha" type="password" autocomplete="current-password" required placeholder="Sua senha"></div>
+        <div><label for="loginCodigo">Codigo de primeiro acesso <span class="optional">opcional</span></label><input id="loginCodigo" inputmode="numeric" maxlength="6" placeholder="000000"></div>
+        <button class="button primary wide" type="submit"><i data-lucide="log-in"></i>Entrar</button>
+      </form>
+      <form id="adminForm" class="form-stack hidden">
+        <div><label for="adminSenha">Senha administrativa</label><input id="adminSenha" type="password" autocomplete="current-password" required placeholder="Senha"></div>
+        <button class="button dark wide" type="submit"><i data-lucide="shield-check"></i>Entrar como admin</button>
+      </form>
+      <p id="loginStatus" class="form-status" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <div id="appView" class="app hidden">
+    <header class="topbar">
+      <a class="brand-compact" href="#" aria-label="Fila do Energetico"><span class="brand-mark small"><i data-lucide="zap"></i></span><strong>Fila do Energetico</strong></a>
+      <div class="top-actions">
+        <span id="syncLabel" class="sync-label"></span>
+        <button id="themeBtn" class="icon-button" title="Usar modo claro" aria-label="Alternar tema"><i data-lucide="sun"></i></button>
+        <button id="refreshBtn" class="icon-button" title="Atualizar"><i data-lucide="refresh-cw"></i></button>
+        <button id="adminBtn" class="icon-button hidden" title="Administracao"><i data-lucide="settings-2"></i></button>
+        <button id="logoutBtn" class="avatar-button" title="Sair"><span id="avatarText">A</span></button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section id="spotlight" class="spotlight">
+        <div class="spotlight-main">
+          <div id="spotlightIcon" class="spotlight-icon"><i data-lucide="zap"></i></div>
+          <div><p id="spotlightKicker" class="eyebrow">Proximo a pagar</p><h1 id="nextPayer">-</h1><p id="spotlightText" class="spotlight-text">Fila pronta para a proxima compra.</p></div>
+        </div>
+        <button id="spotlightAction" class="button dark hidden"></button>
+      </section>
+
+      <nav class="tabs" aria-label="Navegacao principal">
+        <button class="tab active" data-tab="fila"><i data-lucide="list-ordered"></i>Fila <span id="queueCount" class="count"></span></button>
+        <button class="tab" data-tab="votacao"><i data-lucide="vote"></i>Votacao <span id="voteDot" class="dot hidden"></span></button>
+        <button class="tab" data-tab="historico"><i data-lucide="history"></i>Historico</button>
+      </nav>
+
+      <section id="view-fila" class="tab-view">
+        <div class="section-heading"><div><p class="eyebrow">Ordem atual</p><h2>Participantes</h2></div><button id="addPersonBtn" class="button secondary hidden"><i data-lucide="user-plus"></i>Adicionar</button></div>
+        <div id="queueList" class="queue-list"></div>
+      </section>
+
+      <section id="view-votacao" class="tab-view hidden">
+        <div class="section-heading"><div><p class="eyebrow">Decisao coletiva</p><h2>Votacao</h2></div><button id="newVoteBtn" class="button secondary"><i data-lucide="plus"></i>Nova votacao</button></div>
+        <div id="voteContent"></div>
+      </section>
+
+      <section id="view-historico" class="tab-view hidden">
+        <div class="section-heading"><div><p class="eyebrow">Registro de atividades</p><h2>Historico</h2></div></div>
+        <div id="purchaseStats" class="purchase-dashboard"></div>
+        <div id="purchaseCalendar" class="purchase-calendar"></div>
+        <div class="history-toolbar"><div class="search-field"><i data-lucide="search"></i><input id="historySearch" placeholder="Buscar no historico"></div><select id="historyFilter" aria-label="Filtrar historico"><option value="">Todos os eventos</option><option value="compra">Compras</option><option value="pagamento">Pagamentos</option><option value="votacao">Votacoes</option><option value="fila">Fila</option><option value="ajuste">Ajustes</option></select></div>
+        <div id="historyList" class="timeline"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="overlay" class="overlay hidden"></div>
+  <aside id="adminDrawer" class="drawer hidden" aria-labelledby="adminTitle">
+    <div class="drawer-head"><div><p class="eyebrow">Controles</p><h2 id="adminTitle">Administracao</h2></div><button class="icon-button" data-close title="Fechar"><i data-lucide="x"></i></button></div>
+    <div class="drawer-body">
+      <div class="control-group"><label for="nextSelect">Proximo da fila</label><div class="inline-control"><select id="nextSelect"></select><button id="setNextBtn" class="button secondary">Definir</button></div></div>
+      <button id="registerPurchaseBtn" class="action-row"><i data-lucide="circle-dollar-sign"></i><span><strong>Registrar compra</strong><small>Confirma o pagamento e avanca a fila</small></span><i data-lucide="chevron-right"></i></button>
+      <button id="finishVoteBtn" class="action-row"><i data-lucide="vote"></i><span><strong>Finalizar votacao</strong><small>Encerra a votacao aberta agora</small></span><i data-lucide="chevron-right"></i></button>
+      <button id="cancelVoteBtn" class="action-row danger-action"><i data-lucide="ban"></i><span><strong>Cancelar votacao</strong><small>Encerra sem aprovar nem gerar pagamento</small></span><i data-lucide="chevron-right"></i></button>
+      <button id="undoBtn" class="action-row"><i data-lucide="undo-2"></i><span><strong>Desfazer ultima compra</strong><small>Retorna o ultimo pagador ao inicio</small></span><i data-lucide="chevron-right"></i></button>
+      <button id="backupBtn" class="action-row"><i data-lucide="database-backup"></i><span><strong>Criar backup</strong><small>Salva uma copia da planilha</small></span><i data-lucide="chevron-right"></i></button>
+      <div class="danger-zone"><p class="eyebrow">Zona de risco</p><button id="clearBtn" class="button danger-outline wide"><i data-lucide="trash-2"></i>Apagar todos os dados</button></div>
+    </div>
+  </aside>
+
+  <dialog id="modal" class="modal"><form id="modalForm" method="dialog"><div class="modal-head"><div><p id="modalEyebrow" class="eyebrow"></p><h2 id="modalTitle"></h2></div><button type="button" class="icon-button" data-modal-close title="Fechar"><i data-lucide="x"></i></button></div><div id="modalBody" class="modal-body"></div><div id="modalActions" class="modal-actions"></div></form></dialog>
+
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
