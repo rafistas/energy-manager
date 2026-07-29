@@ -1,6 +1,7 @@
-// Configuração do Supabase (Substitua pelas suas credenciais do painel do Supabase)
-const SUPABASE_URL = window.ENV_SUPABASE_URL || "https://SUA-INSTANCIA.supabase.co";
-const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "SUA_CHAVE_ANONIMA_AQUI";
+// Configuração do Supabase
+const SUPABASE_URL = window.ENV_SUPABASE_URL || "https://gmmxgjtlvilowwcudypm.supabase.co";
+const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtbXhnanRsdmlsb3d3Y3VkeXBtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTI1NTc4MCwiZXhwIjoyMTAwODMxNzgwfQ.OSMtGFjaTlrEHaPWIAdXCfheGXPwO4ZxJ4L9AwUjaG0";
+
 
 const SESSION_KEY = "energy_manager_session_v2";
 const THEME_KEY = "energy_manager_theme";
@@ -418,21 +419,91 @@ function renderPurchaseStats() {
 
 function renderPurchaseCalendar() {
   const container = $('purchaseCalendar'); if (!container) return;
-  const year = purchaseCalendarDate.getFullYear(), month = purchaseCalendarDate.getMonth(), firstDay = new Date(year, month, 1).getDay(), daysInMonth = new Date(year, month + 1, 0).getDate();
-  const daily = {}; purchaseRecords().forEach(record => { if (!record.data) return; daily[record.data] = (daily[record.data] || 0) + (Number(record.quantidade) || 0); });
+  const today = new Date();
+  const year = purchaseCalendarDate.getFullYear();
+  const month = purchaseCalendarDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const records = purchaseRecords();
+  let totalUnitsMonth = 0;
+  const daily = {};
+  records.forEach(record => {
+    if (!record.data) return;
+    const d = new Date(record.data + "T00:00:00");
+    if (d.getFullYear() === year && d.getMonth() === month) {
+      const qtd = Number(record.quantidade) || 1;
+      totalUnitsMonth += qtd;
+      daily[record.data] = (daily[record.data] || 0) + qtd;
+    }
+  });
+  const totalLitersMonth = totalUnitsMonth * 2;
+
   const monthName = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(purchaseCalendarDate);
-  let cells = "";
-  for (let blank = 0; blank < firstDay; blank += 1) cells += '<div class="calendar-day outside" aria-hidden="true"></div>';
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const amount = daily[key] || 0;
-    cells += `<div class="calendar-day ${amount > 0 ? "has-purchases" : ""}"><span class="calendar-date-number">${day}</span>${amount > 0 ? `<strong class="calendar-badge">${amount}</strong>` : ""}</div>`;
+  const formattedMonthName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+
+  let gridHtml = "";
+  for (let blank = 0; blank < firstDay; blank += 1) {
+    gridHtml += '<div class="calendar-day outside" aria-hidden="true"></div>';
   }
-  container.innerHTML = `<div class="calendar-header"><div><p class="eyebrow">Calendário de consumo</p><h3>${monthName}</h3></div><div class="calendar-nav"><button id="prevMonthBtn" class="icon-button" title="Mês anterior"><i data-lucide="chevron-left"></i></button><button id="nextMonthBtn" class="icon-button" title="Próximo mês"><i data-lucide="chevron-right"></i></button></div></div><div class="calendar-grid"><div class="calendar-weekday">Dom</div><div class="calendar-weekday">Seg</div><div class="calendar-weekday">Ter</div><div class="calendar-weekday">Qua</div><div class="calendar-weekday">Qui</div><div class="calendar-weekday">Sex</div><div class="calendar-weekday">Sáb</div>${cells}</div>`;
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const amount = daily[dateStr] || 0;
+    const isToday = (today.getFullYear() === year && today.getMonth() === month && today.getDate() === day);
+
+    const classes = ["calendar-day"];
+    if (amount > 0) classes.push("has-purchase");
+    if (isToday) classes.push("today");
+
+    let bottleHtml = "";
+    if (amount > 0) {
+      bottleHtml = '<div class="calendar-bottle"><i></i><b><em></em></b></div>';
+    }
+    let countHtml = "";
+    if (amount > 0) {
+      countHtml = `<span class="calendar-count">${amount}</span>`;
+    }
+
+    gridHtml += `<div class="${classes.join(" ")}"><span class="calendar-number">${day}</span>${bottleHtml}${countHtml}</div>`;
+  }
+
+  container.innerHTML = `
+    <div class="calendar-head">
+      <div>
+        <p class="eyebrow">CALENDARIO DE COMPRAS</p>
+        <h3>${formattedMonthName}</h3>
+      </div>
+      <div class="calendar-summary">
+        <span>${totalUnitsMonth} unidades</span>
+        <span>${totalLitersMonth} L</span>
+      </div>
+      <div class="calendar-nav">
+        <button id="prevMonthBtn" class="icon-button" title="Mês anterior"><i data-lucide="chevron-left"></i></button>
+        <button id="todayMonthBtn" class="button secondary">Hoje</button>
+        <button id="nextMonthBtn" class="icon-button" title="Próximo mês"><i data-lucide="chevron-right"></i></button>
+      </div>
+    </div>
+    <div class="calendar-weekdays">
+      <span>DOM</span>
+      <span>SEG</span>
+      <span>TER</span>
+      <span>QUA</span>
+      <span>QUI</span>
+      <span>SEX</span>
+      <span>SÁB</span>
+    </div>
+    <div class="calendar-grid">
+      ${gridHtml}
+    </div>
+  `;
+
   $('prevMonthBtn').onclick = () => { purchaseCalendarDate.setMonth(purchaseCalendarDate.getMonth() - 1); renderPurchaseCalendar(); };
   $('nextMonthBtn').onclick = () => { purchaseCalendarDate.setMonth(purchaseCalendarDate.getMonth() + 1); renderPurchaseCalendar(); };
+  $('todayMonthBtn').onclick = () => { purchaseCalendarDate = new Date(today.getFullYear(), today.getMonth(), 1); renderPurchaseCalendar(); };
   icons();
 }
+
 
 function renderHistory() {
   const term = $('historySearch').value.trim().toLowerCase(), type = $('historyFilter').value;

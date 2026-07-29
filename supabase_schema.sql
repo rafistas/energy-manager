@@ -580,8 +580,8 @@ BEGIN
     END IF;
 
     -- Registra a compra para estatísticas
-    INSERT INTO compras (nome, quantidade, registrado_por)
-    VALUES (v_next_person.nome, 1, p_confirmado_por);
+    INSERT INTO compras (nome, quantidade, registrado_por, data)
+    VALUES (v_next_person.nome, 1, p_confirmado_por, (now() AT TIME ZONE 'America/Sao_Paulo')::date);
 
     -- Rotaciona a pessoa para o final da fila
     SELECT max(ordem) INTO v_max_ordem FROM pessoas WHERE ativo = TRUE;
@@ -615,8 +615,9 @@ BEGIN
         RAISE EXCEPTION 'Participante não encontrado.';
     END IF;
 
-    INSERT INTO compras (nome, quantidade, registrado_por)
-    VALUES (v_person.nome, p_quantidade, p_ator);
+    INSERT INTO compras (nome, quantidade, registrado_por, data)
+    VALUES (v_person.nome, p_quantidade, p_ator, (now() AT TIME ZONE 'America/Sao_Paulo')::date);
+
 
     SELECT max(ordem) INTO v_max_ordem FROM pessoas WHERE ativo = TRUE;
     UPDATE pessoas SET ordem = v_max_ordem + 1 WHERE id = v_person.id;
@@ -681,3 +682,14 @@ BEGIN
     RETURN fn_get_state('Admin');
 END;
 $$ LANGUAGE plpgsql VOLATILE;
+
+-- ==========================================
+-- 7. PERMISSÕES E SECURITY DEFINER
+-- ==========================================
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated;
+
