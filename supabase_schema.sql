@@ -100,13 +100,13 @@ ALTER PUBLICATION supabase_realtime ADD TABLE pessoas, historico, votacoes, voto
 
 -- 3. FUNÇÕES AUXILIARES
 
-CREATE OR REPLACE FUNCTION fn_hash(p_input TEXT) RETURNS TEXT AS $$
+CREATE OR REPLACE FUNCTION fn_hash(p_input TEXT) RETURNS TEXT SECURITY DEFINER AS $$
 BEGIN
     RETURN encode(digest(p_input, 'sha256'), 'hex');
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
-CREATE OR REPLACE FUNCTION fn_generate_activation_code() RETURNS TEXT AS $$
+CREATE OR REPLACE FUNCTION fn_generate_activation_code() RETURNS TEXT SECURITY DEFINER AS $$
 DECLARE
     v_code TEXT;
 BEGIN
@@ -117,7 +117,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 4. FUNÇÃO PARA RETORNAR O ESTADO COMPLETO (getState)
 
-CREATE OR REPLACE FUNCTION fn_get_state(p_session_person TEXT DEFAULT NULL) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_get_state(p_session_person TEXT DEFAULT NULL) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_pessoas JSONB;
     v_historico JSONB;
@@ -234,7 +234,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 5. FUNÇÕES DE AUTENTICAÇÃO
 
-CREATE OR REPLACE FUNCTION fn_login_participant(p_nome TEXT, p_senha TEXT, p_codigo TEXT DEFAULT '') RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_login_participant(p_nome TEXT, p_senha TEXT, p_codigo TEXT DEFAULT '') RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_person RECORD;
     v_clean_senha TEXT := trim(p_senha);
@@ -289,7 +289,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_login_admin(p_admin_senha TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_login_admin(p_admin_senha TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_config_pwd TEXT;
 BEGIN
@@ -307,7 +307,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 6. OPERAÇÕES DE GERENCIAMENTO DA FILA
 
-CREATE OR REPLACE FUNCTION fn_add_person(p_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_add_person(p_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_clean_nome TEXT := trim(p_nome);
     v_person RECORD;
@@ -355,7 +355,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_remove_person(p_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_remove_person(p_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 BEGIN
     UPDATE pessoas SET ativo = FALSE WHERE lower(nome) = lower(trim(p_nome));
     INSERT INTO historico (tipo, texto, ator, pagador)
@@ -364,7 +364,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_toggle_pause(p_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_toggle_pause(p_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_pausado BOOLEAN;
 BEGIN
@@ -381,7 +381,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_reset_access(p_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_reset_access(p_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_clean_nome TEXT := trim(p_nome);
     v_code TEXT;
@@ -401,7 +401,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_set_next_person(p_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_set_next_person(p_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_selected RECORD;
     v_max_ordem INT;
@@ -433,7 +433,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 7. OPERAÇÕES DE VOTAÇÃO
 
-CREATE OR REPLACE FUNCTION fn_create_vote(p_motivo TEXT, p_criado_por TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_create_vote(p_motivo TEXT, p_criado_por TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_clean_motivo TEXT := trim(p_motivo);
     v_open INT;
@@ -460,7 +460,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_cast_vote(p_votacao_id UUID, p_pessoa TEXT, p_voto TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_cast_vote(p_votacao_id UUID, p_pessoa TEXT, p_voto TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_vote_rec RECORD;
     v_existing INT;
@@ -481,7 +481,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_finish_vote() RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_finish_vote() RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_vote_rec RECORD;
     v_sim_count INT;
@@ -523,7 +523,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_cancel_vote(p_admin_nome TEXT) RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_cancel_vote(p_admin_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_vote_rec RECORD;
 BEGIN
@@ -545,7 +545,7 @@ CREATE OR REPLACE FUNCTION fn_confirm_payment(
     p_comprovante TEXT DEFAULT '',
     p_valor NUMERIC DEFAULT 17.50,
     p_confirmado_por TEXT DEFAULT 'Admin'
-) RETURNS JSONB AS $$
+) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_pending RECORD;
     v_next_person RECORD;
@@ -604,7 +604,7 @@ CREATE OR REPLACE FUNCTION fn_register_purchase(
     p_nome TEXT,
     p_quantidade NUMERIC DEFAULT 1,
     p_ator TEXT DEFAULT 'Admin'
-) RETURNS JSONB AS $$
+) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_clean_nome TEXT := trim(p_nome);
     v_person RECORD;
@@ -634,7 +634,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_undo_last_purchase(p_admin_nome TEXT DEFAULT 'Admin') RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_undo_last_purchase(p_admin_nome TEXT DEFAULT 'Admin') RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_mov RECORD;
     v_compra RECORD;
@@ -676,7 +676,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_clear_all() RETURNS JSONB AS $$
+CREATE OR REPLACE FUNCTION fn_clear_all() RETURNS JSONB SECURITY DEFINER AS $$
 BEGIN
     TRUNCATE TABLE compras, movimentacoes, pendencias, votos, votacoes, historico, pessoas RESTART IDENTITY CASCADE;
     RETURN fn_get_state('Admin');

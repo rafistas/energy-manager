@@ -1,6 +1,6 @@
 // Configuração do Supabase
 const SUPABASE_URL = window.ENV_SUPABASE_URL || "https://gmmxgjtlvilowwcudypm.supabase.co";
-const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtbXhnanRsdmlsb3d3Y3VkeXBtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTI1NTc4MCwiZXhwIjoyMTAwODMxNzgwfQ.OSMtGFjaTlrEHaPWIAdXCfheGXPwO4ZxJ4L9AwUjaG0";
+const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdtbXhnanRsdmlsb3d3Y3VkeXBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTU3ODAsImV4cCI6MjEwMDgzMTc4MH0.mAciU6FJGRHxCKIwuC6aRv4t0KGtiuvbX2kmM4M6oZI";
 
 
 const SESSION_KEY = "energy_manager_session_v2";
