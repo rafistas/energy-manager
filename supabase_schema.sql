@@ -684,7 +684,7 @@ END;
 $$ LANGUAGE plpgsql VOLATILE;
 
 -- ==========================================
--- 7. PERMISSÕES E SECURITY DEFINER
+-- 7. PERMISSÕES, RLS E SECURITY DEFINER
 -- ==========================================
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
@@ -692,4 +692,38 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated;
+
+-- Habilita RLS e adiciona políticas de acesso permissivas para a chave anon
+ALTER TABLE configuracoes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pessoas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE historico ENABLE ROW LEVEL SECURITY;
+ALTER TABLE votacoes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE votos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pendencias ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimentacoes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE compras ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "anon_all_configuracoes" ON configuracoes;
+CREATE POLICY "anon_all_configuracoes" ON configuracoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_pessoas" ON pessoas;
+CREATE POLICY "anon_all_pessoas" ON pessoas FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_historico" ON historico;
+CREATE POLICY "anon_all_historico" ON historico FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_votacoes" ON votacoes;
+CREATE POLICY "anon_all_votacoes" ON votacoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_votos" ON votos;
+CREATE POLICY "anon_all_votos" ON votos FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_pendencias" ON pendencias;
+CREATE POLICY "anon_all_pendencias" ON pendencias FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_movimentacoes" ON movimentacoes;
+CREATE POLICY "anon_all_movimentacoes" ON movimentacoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "anon_all_compras" ON compras;
+CREATE POLICY "anon_all_compras" ON compras FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 

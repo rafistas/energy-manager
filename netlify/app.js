@@ -284,9 +284,10 @@ function renderSpotlight() {
   $('spotlightKicker').textContent = pending ? "Pagamento pendente" : "Próximo a pagar";
   $('spotlightText').textContent = pending ? `${pending.tipo}${pending.observacao ? ` · ${pending.observacao}` : ""}` : "Fila pronta para a próxima compra.";
   const action = $('spotlightAction');
-  action.classList.toggle('hidden', !(pending && session?.tipo === "admin"));
-  if (pending) {
-    action.innerHTML = '<i data-lucide="circle-check"></i>Confirmar pagamento';
+  const isAdmin = session?.tipo === "admin";
+  action.classList.toggle('hidden', !isAdmin);
+  if (isAdmin) {
+    action.innerHTML = `<i data-lucide="circle-check"></i>${pending ? "Confirmar pagamento" : `Registrar compra (${esc(next?.nome || "Próximo")})`}`;
     action.onclick = openPaymentModal;
   }
 }
