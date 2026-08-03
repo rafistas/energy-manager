@@ -162,33 +162,41 @@ BEGIN
     -- Votação ativa
     SELECT * INTO v_active_vote FROM votacoes WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 1;
     IF FOUND THEN
-        SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'sim';
-        SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'nao';
-        SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
-        
-        v_elegiveis_count := jsonb_array_length(v_active_vote.elegiveis);
-        v_maioria := floor(v_elegiveis_count / 2) + 1;
+        -- Auto-finalizar se já passaram 15 minutos desde a criação
+        IF v_active_vote.criado_em <= (now() - INTERVAL '15 minutes') THEN
+            PERFORM fn_finish_vote();
+            v_active_vote := NULL;
+            v_votacao := NULL;
+        ELSE
+            SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'sim';
+            SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'nao';
+            SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
+            
+            v_elegiveis_count := jsonb_array_length(v_active_vote.elegiveis);
+            v_maioria := floor(v_elegiveis_count / 2) + 1;
 
-        IF p_session_person IS NOT NULL THEN
-            SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
+            IF p_session_person IS NOT NULL THEN
+                SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
+            END IF;
+
+            v_encerrar_em := to_char((v_active_vote.criado_em + INTERVAL '15 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS');
+
+            v_votacao := jsonb_build_object(
+                'id', v_active_vote.id,
+                'motivo', v_active_vote.motivo,
+                'criadoPor', v_active_vote.criado_por,
+                'criadoEm', to_char(v_active_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
+                'encerraEm', v_encerrar_em,
+                'encerraEmIso', to_char((v_active_vote.criado_em + INTERVAL '15 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'sim', v_sim_count,
+                'nao', v_nao_count,
+                'total', v_elegiveis_count,
+                'maioria', v_maioria,
+                'faltamParaAprovar', greatest(0, v_maioria - v_sim_count),
+                'meuVoto', v_voto_usuario,
+                'votantes', v_votantes
+            );
         END IF;
-
-        v_encerrar_em := to_char((v_active_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS');
-
-        v_votacao := jsonb_build_object(
-            'id', v_active_vote.id,
-            'motivo', v_active_vote.motivo,
-            'criadoPor', v_active_vote.criado_por,
-            'criadoEm', to_char(v_active_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
-            'encerraEm', v_encerrar_em,
-            'sim', v_sim_count,
-            'nao', v_nao_count,
-            'total', v_elegiveis_count,
-            'maioria', v_maioria,
-            'faltamParaAprovar', greatest(0, v_maioria - v_sim_count),
-            'meuVoto', v_voto_usuario,
-            'votantes', v_votantes
-        );
     END IF;
 
     -- Pagamento pendente ativo
@@ -468,6 +476,11 @@ BEGIN
     SELECT * INTO v_vote_rec FROM votacoes WHERE id = p_votacao_id AND status = 'ABERTA';
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Votação não está mais aberta.';
+    END IF;
+
+    IF v_vote_rec.criado_em <= (now() - INTERVAL '15 minutes') THEN
+        PERFORM fn_finish_vote();
+        RAISE EXCEPTION 'Votação expirou e foi encerrada.';
     END IF;
 
     INSERT INTO votos (votacao_id, pessoa, voto)

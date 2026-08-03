@@ -372,12 +372,23 @@ function parseBrDate(value) {
   const match = String(value).match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/);
   return match ? new Date(+match[3], +match[2] - 1, +match[1], +match[4], +match[5], +match[6]) : null;
 }
+function parseVoteEndDate(vote) {
+  if (!vote) return null;
+  if (vote.encerraEmIso) {
+    const isoDate = new Date(vote.encerraEmIso);
+    if (!isNaN(isoDate.getTime())) return isoDate;
+  }
+  return parseBrDate(vote.encerraEm);
+}
 function updateCountdown() {
-  const element = $('countdown'), end = parseBrDate(state.votacao?.encerraEm);
+  const element = $('countdown'), end = parseVoteEndDate(state.votacao);
   if (!element || !end) return;
-  const seconds = Math.max(0, Math.floor((end - Date.now()) / 1000));
+  const seconds = Math.max(0, Math.floor((end.getTime() - Date.now()) / 1000));
   element.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  if (!seconds) loadState(true);
+  if (seconds <= 0) {
+    clearInterval(countdownTimer);
+    loadState(true);
+  }
 }
 
 function castVote(value) { confirmAction(`Votar ${value}`, "O voto não poderá ser alterado depois da confirmação.", button => execute("castVote", { voto: value }, "Voto registrado.", button)); }
