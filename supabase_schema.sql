@@ -88,9 +88,9 @@ CREATE TABLE IF NOT EXISTS compras (
     criado_em TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Insere configurações padrão se não existirem
+-- Insere configurações padrão se não existirem (senha de admin criptografada em sha256)
 INSERT INTO configuracoes (chave, valor) VALUES
-    ('admin_password', 'admin123'),
+    ('admin_password', encode(digest('admin123', 'sha256'), 'hex')),
     ('unit_price', '17.50'),
     ('unit_liters', '2.00')
 ON CONFLICT (chave) DO NOTHING;
@@ -221,7 +221,7 @@ BEGIN
         'nome', nome
     ) ORDER BY data DESC), '[]'::jsonb)
     INTO v_compras
-    FROM compras;
+    FROM (SELECT * FROM compras ORDER BY data DESC LIMIT 500) c;
 
     RETURN jsonb_build_object(
         'pessoas', v_pessoas,
@@ -697,7 +697,7 @@ END;
 $$ LANGUAGE plpgsql VOLATILE;
 
 -- ==========================================
--- 7. PERMISSÕES, RLS E SECURITY DEFINER
+-- 7. PERMISSÕES, RLS E SECURITY DEFINER (SEGURA CONTRA ESCRITA E LEITURA DIRETA)
 -- ==========================================
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
@@ -706,7 +706,7 @@ GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated;
 
--- Habilita RLS e adiciona políticas de acesso permissivas para a chave anon
+-- Habilita RLS em todas as tabelas
 ALTER TABLE configuracoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pessoas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE historico ENABLE ROW LEVEL SECURITY;
@@ -716,27 +716,46 @@ ALTER TABLE pendencias ENABLE ROW LEVEL SECURITY;
 ALTER TABLE movimentacoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE compras ENABLE ROW LEVEL SECURITY;
 
+-- Limpa políticas legadas se existirem
 DROP POLICY IF EXISTS "anon_all_configuracoes" ON configuracoes;
-CREATE POLICY "anon_all_configuracoes" ON configuracoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_pessoas" ON pessoas;
-CREATE POLICY "anon_all_pessoas" ON pessoas FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_historico" ON historico;
-CREATE POLICY "anon_all_historico" ON historico FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_votacoes" ON votacoes;
-CREATE POLICY "anon_all_votacoes" ON votacoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_votos" ON votos;
-CREATE POLICY "anon_all_votos" ON votos FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_pendencias" ON pendencias;
-CREATE POLICY "anon_all_pendencias" ON pendencias FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_movimentacoes" ON movimentacoes;
-CREATE POLICY "anon_all_movimentacoes" ON movimentacoes FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
-
 DROP POLICY IF EXISTS "anon_all_compras" ON compras;
-CREATE POLICY "anon_all_compras" ON compras FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Políticas Seguras: Leitura pública para tabelas operacionais (necessário para Realtime WebSockets)
+-- Nenhuma política de INSERT/UPDATE/DELETE direta para anon/authenticated (força uso de RPCs SECURITY DEFINER)
+CREATE POLICY "read_pessoas" ON pessoas FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_historico" ON historico FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_votacoes" ON votacoes FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_votos" ON votos FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_pendencias" ON pendencias FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_movimentacoes" ON movimentacoes FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "read_compras" ON compras FOR SELECT TO anon, authenticated USING (true);
+
+-- A tabela configuracoes NÃO possui leitura direta por REST (somente via RPC SECURITY DEFINER)
+
+-- 8. ÍNDICES DE ALTA PERFORMANCE
+-- ==========================================
+CREATE INDEX IF NOT EXISTS idx_historico_data ON historico(data DESC);
+CREATE INDEX IF NOT EXISTS idx_votos_votacao_id ON votos(votacao_id);
+CREATE INDEX IF NOT EXISTS idx_votacoes_status ON votacoes(status);
+CREATE INDEX IF NOT EXISTS idx_compras_data ON compras(data DESC);
+CREATE INDEX IF NOT EXISTS idx_pessoas_ordem ON pessoas(ordem ASC);
+CREATE INDEX IF NOT EXISTS idx_pendencias_status ON pendencias(status);
+
+-- 9. AUTOMAÇÃO DE SEXTA-FEIRA (OPCIONAL VIA PG_CRON SUPABASE)
+-- ==========================================
+-- Para ativar a criação automática de pendências no Supabase toda sexta às 08:00:
+-- CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- SELECT cron.schedule(
+--     'pendencia_sexta_feira_08am',
+--     '0 8 * * 5',
+--     $$ INSERT INTO pendencias (tipo, origem, observacao, status, valor)
+--        VALUES ('Pagamento obrigatório de sexta-feira', 'automatico', 'Gerado automaticamente toda sexta-feira', 'PENDENTE', 17.50); $$
+-- );
+
 
