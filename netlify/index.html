@@ -8,10 +8,12 @@
   <script>document.documentElement.dataset.theme=localStorage.getItem("energy_manager_theme")||"dark";</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
 
   <main id="loginView" class="login-layout">
@@ -44,6 +46,7 @@
     <header class="topbar">
       <a class="brand-compact" href="#" aria-label="Fila do Energetico"><span class="brand-mark small"><i data-lucide="zap"></i></span><strong>Fila do Energetico</strong></a>
       <div class="top-actions">
+        <div id="rtStatus" class="rt-status connecting" title="Status da conexão em tempo real"><span class="rt-dot"></span><span id="rtStatusText" class="rt-text">Conectando...</span></div>
         <span id="syncLabel" class="sync-label"></span>
         <button id="themeBtn" class="icon-button" title="Usar modo claro" aria-label="Alternar tema"><i data-lucide="sun"></i></button>
         <button id="refreshBtn" class="icon-button" title="Atualizar"><i data-lucide="refresh-cw"></i></button>

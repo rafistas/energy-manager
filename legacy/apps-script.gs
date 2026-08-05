@@ -986,6 +986,7 @@ function getState(params) {
       status: activeVote.status,
       criadoEm: formatDate(activeVote.criadoEm),
       encerraEm: formatDate(getVoteEndDate(activeVote)),
+      encerraEmIso: getVoteEndDate(activeVote) ? getVoteEndDate(activeVote).toISOString() : null,
       sim: votes.filter(item => item.voto === "sim").length,
       nao: votes.filter(item => item.voto === "nao").length,
       total: eligibleCount,

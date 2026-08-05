@@ -238,9 +238,29 @@ async function loadState(silent = false) {
   }
 }
 
+function updateRealtimeStatus(status) {
+  const container = $('rtStatus'), text = $('rtStatusText');
+  if (!container || !text) return;
+
+  if (status === 'SUBSCRIBED') {
+    container.className = 'rt-status connected';
+    text.textContent = 'Ao vivo';
+    container.title = 'Conectado em tempo real';
+  } else if (status === 'TIMED_OUT' || status === 'CLOSED') {
+    container.className = 'rt-status disconnected';
+    text.textContent = 'Off-line';
+    container.title = 'Conexão interrompida. Clique em atualizar.';
+  } else {
+    container.className = 'rt-status connecting';
+    text.textContent = 'Reconectando...';
+    container.title = 'Estabelecendo conexão em tempo real...';
+  }
+}
+
 function startRealtime() {
   if (!supabaseClient || realtimeChannel) return;
   loadState(true);
+  updateRealtimeStatus('CONNECTING');
 
   // Escuta alterações em tempo real via WebSockets
   realtimeChannel = supabaseClient
@@ -248,7 +268,9 @@ function startRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public' }, () => {
       loadState(true);
     })
-    .subscribe();
+    .subscribe((status) => {
+      updateRealtimeStatus(status);
+    });
 }
 
 function applyState(data) {
@@ -304,7 +326,8 @@ function renderQueue() {
   container.innerHTML = state.pessoas.map(person => {
     if (!person.pausado) activePosition++;
     const isNext = !person.pausado && activePosition === 1;
-    return `<article class="queue-row ${isNext ? "next" : ""} ${person.pausado ? "paused" : ""}"><span class="position">${person.pausado ? "–" : activePosition}</span><div><div class="person-name">${esc(person.nome)}</div><div class="person-meta">${isNext ? '<span class="status-pill green">Próximo</span>' : ""}${person.pausado ? '<span class="status-pill">Em pausa</span>' : ""}${!person.hasPassword ? '<span class="status-pill">Primeiro acesso</span>' : ""}</div></div>${admin ? `<div class="row-actions"><button class="icon-button" data-action="pause" data-name="${esc(person.nome)}" title="${person.pausado ? "Retomar" : "Pausar"}"><i data-lucide="${person.pausado ? "play" : "pause"}"></i></button><button class="icon-button" data-action="access" data-name="${esc(person.nome)}" title="Gerar novo acesso"><i data-lucide="key-round"></i></button><button class="icon-button" data-action="remove" data-name="${esc(person.nome)}" title="Remover"><i data-lucide="user-minus"></i></button></div>` : ""}</article>`;
+    const posLabel = person.pausado ? "–" : (isNext ? '<i data-lucide="crown" style="width:16px;height:16px;"></i>' : activePosition);
+    return `<article class="queue-row ${isNext ? "next" : ""} ${person.pausado ? "paused" : ""}"><span class="position">${posLabel}</span><div><div class="person-name">${esc(person.nome)}</div><div class="person-meta">${isNext ? '<span class="status-pill amber"><i data-lucide="zap"></i>Próximo a pagar</span>' : ""}${person.pausado ? '<span class="status-pill">Em pausa</span>' : ""}${!person.hasPassword ? '<span class="status-pill">Primeiro acesso</span>' : ""}</div></div>${admin ? `<div class="row-actions"><button class="icon-button" data-action="pause" data-name="${esc(person.nome)}" title="${person.pausado ? "Retomar" : "Pausar"}"><i data-lucide="${person.pausado ? "play" : "pause"}"></i></button><button class="icon-button" data-action="access" data-name="${esc(person.nome)}" title="Gerar novo acesso"><i data-lucide="key-round"></i></button><button class="icon-button" data-action="remove" data-name="${esc(person.nome)}" title="Remover"><i data-lucide="user-minus"></i></button></div>` : ""}</article>`;
   }).join("");
   container.querySelectorAll('[data-action]').forEach(button => button.onclick = () => queueAction(button.dataset.action, button.dataset.name, button));
 }
@@ -370,14 +393,25 @@ function renderVote() {
 
 function parseBrDate(value) {
   const match = String(value).match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/);
-  return match ? new Date(+match[3], +match[2] - 1, +match[1], +match[4], +match[5], +match[6]) : null;
+  return match ? new Date(`${match[3]}-${match[2]}-${match[1]}T${match[4]}:${match[5]}:${match[6]}-03:00`) : null;
+}
+function parseVoteEndDate(vote) {
+  if (!vote) return null;
+  if (vote.encerraEmIso) {
+    const isoDate = new Date(vote.encerraEmIso);
+    if (!isNaN(isoDate.getTime())) return isoDate;
+  }
+  return parseBrDate(vote.encerraEm);
 }
 function updateCountdown() {
-  const element = $('countdown'), end = parseBrDate(state.votacao?.encerraEm);
+  const element = $('countdown'), end = parseVoteEndDate(state.votacao);
   if (!element || !end) return;
-  const seconds = Math.max(0, Math.floor((end - Date.now()) / 1000));
+  const seconds = Math.max(0, Math.floor((end.getTime() - Date.now()) / 1000));
   element.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  if (!seconds) loadState(true);
+  if (seconds <= 0) {
+    clearInterval(countdownTimer);
+    loadState(true);
+  }
 }
 
 function castVote(value) { confirmAction(`Votar ${value}`, "O voto não poderá ser alterado depois da confirmação.", button => execute("castVote", { voto: value }, "Voto registrado.", button)); }
@@ -476,7 +510,7 @@ function renderPurchaseCalendar() {
         <h3>${formattedMonthName}</h3>
       </div>
       <div class="calendar-summary">
-        <span>${totalUnitsMonth} unidades</span>
+        <span>${totalUnitsMonth} ${totalUnitsMonth === 1 ? "unidade" : "unidades"}</span>
         <span>${totalLitersMonth} L</span>
       </div>
       <div class="calendar-nav">
@@ -582,10 +616,13 @@ function openVoteModal() {
 
 function openPaymentModal() {
   const pending = state.pagamentoPendente;
-  openModal("Pagamento", pending ? pending.tipo : "Registrar compra", `<div class="field-row"><div class="field"><label for="paymentValue">Valor</label><input id="paymentValue" inputmode="decimal" placeholder="17,50"></div><div class="field"><label for="paymentMethod">Forma</label><select id="paymentMethod"><option value="PIX">PIX</option><option value="Dinheiro">Dinheiro</option><option value="Cartão">Cartão</option></select></div></div><div class="field"><label for="paymentProof">Comprovante <span class="optional">link ou referência</span></label><input id="paymentProof" placeholder="Opcional"></div>`, `<button type="button" class="button secondary" data-modal-close>Cancelar</button><button id="savePaymentBtn" type="button" class="button dark">Confirmar e avançar</button>`);
-  const button = $('savePaymentBtn');
-  button.onclick = () => execute("registerPurchase", { tipo: pending?.tipo || "Compra registrada pelo admin", valor: $('paymentValue').value.trim(), metodo: $('paymentMethod').value, comprovante: $('paymentProof').value.trim() }, "Compra registrada.", button);
-  bindModalClose();
+  const nextPayer = state.pessoas.find(person => !person.pausado)?.nome || "Próximo";
+  const title = pending ? "Confirmar pagamento pendente" : `Registrar compra (${nextPayer})`;
+  const text = pending 
+    ? `Confirmar pagamento no valor fixo de R$ 17,50 (${pending.tipo})? A fila irá avançar.` 
+    : `Confirmar a compra de energético para ${nextPayer} no valor fixo de R$ 17,50? A fila irá avançar.`;
+
+  confirmAction(title, text, button => execute("registerPurchase", { valor: "17.50", metodo: "PIX" }, "Compra registrada.", button));
 }
 
 function openDrawer() { $('overlay').classList.remove('hidden'); $('adminDrawer').classList.remove('hidden'); icons(); }
