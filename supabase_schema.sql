@@ -173,7 +173,7 @@ BEGIN
             SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
             
             v_elegiveis_count := jsonb_array_length(v_active_vote.elegiveis);
-            v_maioria := floor(v_elegiveis_count / 2) + 1;
+            v_maioria := 4;
 
             IF p_session_person IS NOT NULL THEN
                 SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
@@ -332,7 +332,7 @@ BEGIN
 
     v_code := fn_generate_activation_code();
 
-    IF FOUND THEN
+    IF v_person.id IS NOT NULL THEN
         IF v_person.ativo THEN
             RAISE EXCEPTION 'Essa pessoa já está na fila.';
         END IF;
@@ -471,7 +471,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 CREATE OR REPLACE FUNCTION fn_cast_vote(p_votacao_id UUID, p_pessoa TEXT, p_voto TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_vote_rec RECORD;
-    v_existing INT;
+    v_sim_count INT;
 BEGIN
     SELECT * INTO v_vote_rec FROM votacoes WHERE id = p_votacao_id AND status = 'ABERTA';
     IF NOT FOUND THEN
@@ -489,6 +489,12 @@ BEGIN
 
     INSERT INTO historico (tipo, texto, ator)
     VALUES ('votacao', p_pessoa || ' votou ' || upper(trim(p_voto)) || ' na votação: ' || v_vote_rec.motivo, p_pessoa);
+
+    -- Se atingiu 4 votos SIM, finaliza e aprova automaticamente
+    SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = p_votacao_id AND voto = 'sim';
+    IF v_sim_count >= 4 THEN
+        PERFORM fn_finish_vote();
+    END IF;
 
     RETURN fn_get_state(p_pessoa);
 END;
@@ -511,9 +517,9 @@ BEGIN
     SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'sim';
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'nao';
     v_total_elegiveis := jsonb_array_length(v_vote_rec.elegiveis);
-    v_maioria := floor(v_total_elegiveis / 2) + 1;
+    v_maioria := 4;
 
-    IF v_sim_count >= v_maioria THEN
+    IF v_sim_count >= 4 OR v_sim_count >= v_maioria THEN
         v_resultado := 'APROVADA';
     ELSE
         v_resultado := 'REJEITADA';
