@@ -332,7 +332,7 @@ BEGIN
 
     v_code := fn_generate_activation_code();
 
-    IF FOUND THEN
+    IF v_person.id IS NOT NULL THEN
         IF v_person.ativo THEN
             RAISE EXCEPTION 'Essa pessoa já está na fila.';
         END IF;
