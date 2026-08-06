@@ -581,6 +581,12 @@ function castVote(params) {
     new Date()
   ]);
 
+  const updatedVotes = getVotesFor(activeVote.id);
+  const simCount = updatedVotes.filter(item => item.voto === "sim").length;
+  if (simCount >= 4) {
+    finalizeVote(activeVote, "auto_4_sim");
+  }
+
   return getState({ actor });
 }
 
@@ -632,8 +638,8 @@ function finalizeVote(activeVote, reason) {
   const eligibleCount = activeVote.elegiveis && activeVote.elegiveis.length
     ? activeVote.elegiveis.length
     : getActivePeople().length;
-  const majority = Math.floor(eligibleCount / 2) + 1;
-  const approved = sim >= majority;
+  const majority = 4;
+  const approved = sim >= 4 || sim >= majority;
   const result = approved ? "aprovada" : "recusada";
 
   const sheet = getSheet(SHEETS.votacoes);
