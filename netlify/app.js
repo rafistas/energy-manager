@@ -477,6 +477,7 @@ function renderPurchaseCalendar() {
   const records = purchaseRecords();
   let totalUnitsMonth = 0;
   const daily = {};
+  const dailyBuyers = {};
   records.forEach(record => {
     if (!record.data) return;
     const d = new Date(record.data + "T00:00:00");
@@ -484,6 +485,9 @@ function renderPurchaseCalendar() {
       const qtd = Number(record.quantidade) || 1;
       totalUnitsMonth += qtd;
       daily[record.data] = (daily[record.data] || 0) + qtd;
+      
+      if (!dailyBuyers[record.data]) dailyBuyers[record.data] = [];
+      dailyBuyers[record.data].push(`${record.nome}${qtd > 1 ? ` (${qtd}x)` : ""}`);
     }
   });
   const totalLitersMonth = totalUnitsMonth * 2;
@@ -514,7 +518,16 @@ function renderPurchaseCalendar() {
       countHtml = `<span class="calendar-count">${amount}</span>`;
     }
 
-    gridHtml += `<div class="${classes.join(" ")}"><span class="calendar-number">${day}</span>${bottleHtml}${countHtml}</div>`;
+    let tooltip = "";
+    let clickHandler = "";
+    if (amount > 0 && dailyBuyers[dateStr]) {
+      const buyersStr = dailyBuyers[dateStr].join(", ");
+      const msg = `Compraram no dia ${String(day).padStart(2, '0')}: ${buyersStr}`;
+      tooltip = ` title="${msg}"`;
+      clickHandler = ` onclick="alert('${msg}')" style="cursor: pointer;"`;
+    }
+
+    gridHtml += `<div class="${classes.join(" ")}"${tooltip}${clickHandler}><span class="calendar-number">${day}</span>${bottleHtml}${countHtml}</div>`;
   }
 
   container.innerHTML = `
