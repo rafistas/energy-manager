@@ -358,7 +358,16 @@ function renderVote() {
   const onlyNoChanged = sameVote && vote.nao > lastVoteState.nao && vote.sim === lastVoteState.sim;
   const energyDirection = onlyYesChanged ? "filling" : onlyNoChanged ? "draining" : energyLevel > previousLevel ? "filling" : energyLevel < previousLevel ? "draining" : "steady";
   
-  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div><span id="countdown" class="countdown">--:--</span></div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyScore} de ${vote.maioria} cargas</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${admin ? '<button id="voteFinishInline" class="button secondary">Finalizar agora</button>' : vote.meuVoto ? `<span class="status-pill green">Seu voto: ${esc(vote.meuVoto.toUpperCase())}</span>` : '<div class="vote-actions"><button id="voteYes" class="button primary">Votar sim</button><button id="voteNo" class="button secondary">Votar não</button></div>'}</div></article>`;
+  const isApproved = vote.status === 'APROVADA';
+  const actionsHtml = isApproved 
+    ? '<div class="status-pill green" style="width: 100%; justify-content: center; padding: 12px; margin-top: 16px;"><i data-lucide="check-circle"></i>Votação finalizada. Aguardando pagamento...</div>'
+    : (admin ? '<button id="voteFinishInline" class="button secondary">Finalizar agora</button>' : vote.meuVoto ? `<span class="status-pill green">Seu voto: ${esc(vote.meuVoto.toUpperCase())}</span>` : '<div class="vote-actions"><button id="voteYes" class="button primary">Votar sim</button><button id="voteNo" class="button secondary">Votar não</button></div>');
+    
+  const countdownHtml = isApproved
+    ? '<span class="status-pill green"><i data-lucide="check"></i>Aprovada</span>'
+    : '<span id="countdown" class="countdown">--:--</span>';
+
+  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div>${countdownHtml}</div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyScore} de ${vote.maioria} cargas</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${actionsHtml}</div></article>`;
   
   const bottle = container.querySelector('.energy-bottle'), liquid = container.querySelector('.energy-liquid');
   if (bottle && liquid && energyDirection !== "steady") {
@@ -372,7 +381,7 @@ function renderVote() {
   lastEnergyLevel = energyLevel;
   lastVoteState = { id: vote.id, sim: vote.sim, nao: vote.nao };
   
-  if (admin) {
+  if (admin && !isApproved) {
     const finishButton = $('voteFinishInline'), actions = document.createElement('div'), cancelButton = document.createElement('button');
     actions.className = 'vote-actions';
     finishButton.onclick = finishVote;
@@ -383,12 +392,17 @@ function renderVote() {
     cancelButton.innerHTML = '<i data-lucide="ban"></i>Cancelar votação';
     cancelButton.onclick = cancelVote;
     actions.appendChild(cancelButton);
-  } else if (!vote.meuVoto) {
+  } else if (!isApproved && !vote.meuVoto) {
     $('voteYes').onclick = () => castVote('sim');
     $('voteNo').onclick = () => castVote('nao');
   }
-  updateCountdown();
-  countdownTimer = setInterval(updateCountdown, 1000);
+  
+  if (!isApproved) {
+    updateCountdown();
+    countdownTimer = setInterval(updateCountdown, 1000);
+  }
+  
+  icons();
 }
 
 function parseBrDate(value) {
