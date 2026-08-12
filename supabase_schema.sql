@@ -570,9 +570,26 @@ CREATE OR REPLACE FUNCTION fn_cancel_vote(p_admin_nome TEXT) RETURNS JSONB SECUR
 DECLARE
     v_vote_rec RECORD;
 BEGIN
-    SELECT * INTO v_vote_rec FROM votacoes WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 1;
+    SELECT * INTO v_vote_rec FROM votacoes 
+    WHERE status = 'ABERTA' 
+       OR (status = 'APROVADA' AND EXISTS (
+           SELECT 1 FROM pendencias 
+           WHERE status = 'PENDENTE' 
+             AND origem = 'votacao' 
+             AND observacao = votacoes.motivo
+       ))
+    ORDER BY criado_em DESC LIMIT 1;
+
     IF FOUND THEN
         UPDATE votacoes SET status = 'CANCELADA', encerrado_em = now(), resultado = 'CANCELADA' WHERE id = v_vote_rec.id;
+        
+        IF v_vote_rec.status = 'APROVADA' THEN
+            UPDATE pendencias SET status = 'CANCELADO' 
+            WHERE status = 'PENDENTE' 
+              AND origem = 'votacao' 
+              AND observacao = v_vote_rec.motivo;
+        END IF;
+
         INSERT INTO historico (tipo, texto, ator)
         VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi cancelada pelo admin.', p_admin_nome);
     END IF;
