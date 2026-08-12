@@ -159,15 +159,38 @@ BEGIN
     INTO v_historico
     FROM (SELECT * FROM historico ORDER BY data DESC LIMIT 100) h;
 
-    -- Votação ativa
-    SELECT * INTO v_active_vote FROM votacoes WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 1;
+    -- Votação ativa ou recentemente aprovada aguardando pagamento
+    SELECT * INTO v_active_vote FROM votacoes 
+    WHERE status = 'ABERTA' 
+       OR (status = 'APROVADA' AND EXISTS (
+           SELECT 1 FROM pendencias 
+           WHERE status = 'PENDENTE' 
+             AND origem = 'votacao' 
+             AND observacao = votacoes.motivo
+       ))
+    ORDER BY criado_em DESC LIMIT 1;
+
     IF FOUND THEN
         -- Auto-finalizar se já passaram 15 minutos desde a criação
-        IF v_active_vote.criado_em <= (now() - INTERVAL '15 minutes') THEN
+        IF v_active_vote.status = 'ABERTA' AND v_active_vote.criado_em <= (now() - INTERVAL '15 minutes') THEN
             PERFORM fn_finish_vote();
-            v_active_vote := NULL;
-            v_votacao := NULL;
-        ELSE
+            
+            -- Tenta recuperar caso tenha sido aprovada e gerado pendência
+            SELECT * INTO v_active_vote FROM votacoes 
+            WHERE status = 'APROVADA' AND id = v_active_vote.id AND EXISTS (
+                SELECT 1 FROM pendencias 
+                WHERE status = 'PENDENTE' 
+                  AND origem = 'votacao' 
+                  AND observacao = votacoes.motivo
+            );
+            
+            IF NOT FOUND THEN
+                v_active_vote := NULL;
+                v_votacao := NULL;
+            END IF;
+        END IF;
+
+        IF v_active_vote IS NOT NULL THEN
             SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'sim';
             SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'nao';
             SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
@@ -183,6 +206,7 @@ BEGIN
 
             v_votacao := jsonb_build_object(
                 'id', v_active_vote.id,
+                'status', v_active_vote.status,
                 'motivo', v_active_vote.motivo,
                 'criadoPor', v_active_vote.criado_por,
                 'criadoEm', to_char(v_active_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
