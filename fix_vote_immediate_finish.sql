@@ -154,7 +154,8 @@ BEGIN
         AND observacao IS NOT DISTINCT FROM v_vote_rec.motivo
         AND status IN ('PENDENTE', 'CONFIRMADO')
         AND criado_em >= v_vote_rec.criado_em
-    );
+    )
+    ON CONFLICT DO NOTHING;
 
     INSERT INTO public.historico (tipo, texto, ator)
     VALUES (
@@ -209,6 +210,10 @@ WHERE p.status = 'PENDENTE'
       AND c.observacao IS NOT DISTINCT FROM p.observacao
       AND c.criado_em = p.criado_em
   );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pendencia_votacao_aberta
+ON public.pendencias ((coalesce(observacao, '')))
+WHERE origem = 'votacao' AND status = 'PENDENTE';
 
 -- Verificacao: deve retornar aproximadamente 600 segundos.
 SELECT EXTRACT(EPOCH FROM (

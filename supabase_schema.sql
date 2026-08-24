@@ -642,7 +642,8 @@ BEGIN
               AND observacao IS NOT DISTINCT FROM v_vote_rec.motivo
               AND status IN ('PENDENTE', 'CONFIRMADO')
               AND criado_em >= v_vote_rec.criado_em
-        );
+        )
+        ON CONFLICT DO NOTHING;
 
         INSERT INTO historico (tipo, texto, ator)
         VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi APROVADA (' || v_sim_count || ' a ' || v_nao_count || '). Pagamento gerado.', 'Admin');
@@ -681,6 +682,10 @@ WHERE p.status = 'PENDENTE'
         AND c.observacao IS NOT DISTINCT FROM p.observacao
         AND c.criado_em = p.criado_em
   );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pendencia_votacao_aberta
+ON pendencias ((coalesce(observacao, '')))
+WHERE origem = 'votacao' AND status = 'PENDENTE';
 
 CREATE OR REPLACE FUNCTION fn_cancel_vote(p_admin_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
