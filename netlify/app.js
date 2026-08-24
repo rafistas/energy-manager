@@ -137,6 +137,16 @@ async function api(action, payload = {}) {
     throw new Error(error.message || "Erro ao conectar com o banco de dados.");
   }
 
+  if (data && !data.votacao) {
+    const { data: activeVote, error: activeVoteError } = await supabaseClient.rpc("fn_get_active_vote", {
+      p_session_person: session?.nome || null
+    });
+
+    if (!activeVoteError && activeVote) {
+      data.votacao = activeVote;
+    }
+  }
+
   return data;
 }
 
