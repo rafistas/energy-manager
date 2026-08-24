@@ -23,6 +23,84 @@ FOR EACH ROW
 WHEN (NEW.status = 'ABERTA')
 EXECUTE FUNCTION public.fn_set_vote_created_at();
 
+-- Leitura independente da votacao ativa. Evita que uma versao antiga de
+-- fn_get_state esconda uma votacao que continua ABERTA no banco.
+CREATE OR REPLACE FUNCTION public.fn_get_active_vote(p_session_person TEXT DEFAULT NULL)
+RETURNS JSONB
+SECURITY DEFINER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_vote RECORD;
+  v_vote_id UUID;
+  v_sim_count INT;
+  v_nao_count INT;
+  v_voto_usuario TEXT := NULL;
+  v_votantes JSONB;
+BEGIN
+  SELECT * INTO v_vote
+  FROM public.votacoes
+  WHERE status = 'ABERTA'
+     OR (status = 'APROVADA' AND EXISTS (
+       SELECT 1 FROM public.pendencias
+       WHERE status = 'PENDENTE'
+         AND origem = 'votacao'
+         AND observacao = votacoes.motivo
+     ))
+  ORDER BY criado_em DESC
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+
+  IF v_vote.status = 'ABERTA'
+     AND clock_timestamp() >= (v_vote.criado_em + INTERVAL '10 minutes') THEN
+    v_vote_id := v_vote.id;
+    PERFORM public.fn_finish_vote();
+
+    SELECT * INTO v_vote
+    FROM public.votacoes
+    WHERE id = v_vote_id
+      AND (status = 'ABERTA' OR (status = 'APROVADA' AND EXISTS (
+        SELECT 1 FROM public.pendencias
+        WHERE status = 'PENDENTE'
+          AND origem = 'votacao'
+          AND observacao = votacoes.motivo
+      )));
+
+    IF NOT FOUND THEN
+      RETURN NULL;
+    END IF;
+  END IF;
+
+  SELECT count(*) INTO v_sim_count FROM public.votos WHERE votacao_id = v_vote.id AND voto = 'sim';
+  SELECT count(*) INTO v_nao_count FROM public.votos WHERE votacao_id = v_vote.id AND voto = 'nao';
+  SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM public.votos WHERE votacao_id = v_vote.id;
+
+  IF p_session_person IS NOT NULL THEN
+    SELECT voto INTO v_voto_usuario FROM public.votos WHERE votacao_id = v_vote.id AND pessoa = p_session_person;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'id', v_vote.id,
+    'status', v_vote.status,
+    'motivo', v_vote.motivo,
+    'criadoPor', v_vote.criado_por,
+    'criadoEm', to_char(v_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
+    'encerraEm', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
+    'encerraEmIso', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    'sim', v_sim_count,
+    'nao', v_nao_count,
+    'total', coalesce(jsonb_array_length(v_vote.elegiveis), 0),
+    'maioria', 4,
+    'faltamParaAprovar', greatest(0, 4 - v_sim_count),
+    'meuVoto', v_voto_usuario,
+    'votantes', v_votantes
+  );
+END;
+$$;
+
 -- Centraliza a finalizacao e impede que chamadas automaticas encerrem cedo.
 CREATE OR REPLACE FUNCTION public.fn_finish_vote_internal(p_force BOOLEAN DEFAULT FALSE)
 RETURNS JSONB
