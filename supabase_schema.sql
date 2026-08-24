@@ -120,6 +120,78 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 4. FUNÇÃO PARA RETORNAR O ESTADO COMPLETO (getState)
 
+CREATE OR REPLACE FUNCTION fn_get_active_vote(p_session_person TEXT DEFAULT NULL) RETURNS JSONB SECURITY DEFINER AS $$
+DECLARE
+    v_vote RECORD;
+    v_vote_id UUID;
+    v_sim_count INT;
+    v_nao_count INT;
+    v_voto_usuario TEXT := NULL;
+    v_votantes JSONB;
+BEGIN
+    SELECT * INTO v_vote
+    FROM votacoes
+    WHERE status = 'ABERTA'
+       OR (status = 'APROVADA' AND EXISTS (
+           SELECT 1 FROM pendencias
+           WHERE status = 'PENDENTE'
+             AND origem = 'votacao'
+             AND observacao = votacoes.motivo
+       ))
+    ORDER BY criado_em DESC
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+
+    IF v_vote.status = 'ABERTA'
+       AND clock_timestamp() >= (v_vote.criado_em + INTERVAL '10 minutes') THEN
+        v_vote_id := v_vote.id;
+        PERFORM fn_finish_vote();
+
+        SELECT * INTO v_vote
+        FROM votacoes
+        WHERE id = v_vote_id
+          AND (status = 'ABERTA' OR (status = 'APROVADA' AND EXISTS (
+              SELECT 1 FROM pendencias
+              WHERE status = 'PENDENTE'
+                AND origem = 'votacao'
+                AND observacao = votacoes.motivo
+          )));
+
+        IF NOT FOUND THEN
+            RETURN NULL;
+        END IF;
+    END IF;
+
+    SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_vote.id AND voto = 'sim';
+    SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote.id AND voto = 'nao';
+    SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_vote.id;
+
+    IF p_session_person IS NOT NULL THEN
+        SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_vote.id AND pessoa = p_session_person;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'id', v_vote.id,
+        'status', v_vote.status,
+        'motivo', v_vote.motivo,
+        'criadoPor', v_vote.criado_por,
+        'criadoEm', to_char(v_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
+        'encerraEm', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
+        'encerraEmIso', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+        'sim', v_sim_count,
+        'nao', v_nao_count,
+        'total', coalesce(jsonb_array_length(v_vote.elegiveis), 0),
+        'maioria', 4,
+        'faltamParaAprovar', greatest(0, 4 - v_sim_count),
+        'meuVoto', v_voto_usuario,
+        'votantes', v_votantes
+    );
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
 CREATE OR REPLACE FUNCTION fn_get_state(p_session_person TEXT DEFAULT NULL) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_pessoas JSONB;
