@@ -1,5 +1,5 @@
 const ADMIN_PASSWORD_PROPERTY = "ADMIN_PASSWORD";
-const VOTE_DURATION_MINUTES = 15;
+const VOTE_DURATION_MINUTES = 10;
 const SESSION_DURATION_HOURS = 12;
 const ENERGY_UNIT_PRICE = 17.50;
 const ENERGY_UNIT_LITERS = 2;
@@ -1146,13 +1146,35 @@ function isVoteExpired(vote) {
 function getVoteEndDate(vote) {
   if (!vote || !vote.criadoEm) return null;
 
-  const createdAt = Object.prototype.toString.call(vote.criadoEm) === "[object Date]"
-    ? vote.criadoEm
-    : new Date(vote.criadoEm);
+  const createdAt = parseVoteDate(vote.criadoEm);
 
-  if (Number.isNaN(createdAt.getTime())) return null;
+  if (!createdAt) return null;
 
   return new Date(createdAt.getTime() + VOTE_DURATION_MINUTES * 60 * 1000);
+}
+
+function parseVoteDate(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]") {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const text = String(value || "").trim();
+  const brMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
+
+  if (brMatch) {
+    const parsed = new Date(
+      Number(brMatch[3]),
+      Number(brMatch[2]) - 1,
+      Number(brMatch[1]),
+      Number(brMatch[4]),
+      Number(brMatch[5]),
+      Number(brMatch[6] || 0)
+    );
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function getPeople() {
