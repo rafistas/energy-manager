@@ -5,6 +5,7 @@ const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsI
 
 const SESSION_KEY = "energy_manager_session_v2";
 const THEME_KEY = "energy_manager_theme";
+const APPROVAL_VOTES_REQUIRED = 4;
 
 // Inicialização do cliente Supabase
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
@@ -137,13 +138,13 @@ async function api(action, payload = {}) {
     throw new Error(error.message || "Erro ao conectar com o banco de dados.");
   }
 
-  if (data && !data.votacao) {
+  if (data) {
     const { data: activeVote, error: activeVoteError } = await supabaseClient.rpc("fn_get_active_vote", {
       p_session_person: session?.nome || null
     });
 
-    if (!activeVoteError && activeVote) {
-      data.votacao = activeVote;
+    if (!activeVoteError) {
+      data.votacao = activeVote || null;
     }
   }
 
@@ -288,12 +289,27 @@ function applyState(data) {
   state = {
     pessoas: data.pessoas || [],
     historico: data.historico || [],
-    votacao: data.votacao || null,
+    votacao: normalizeVote(data.votacao),
     pagamentoPendente: data.pagamentoPendente || null,
     meta: data.meta || {}
   };
   render();
   if (state.meta.codigoAtivacao) showAccessCode(state.meta.codigoNome, state.meta.codigoAtivacao);
+}
+
+function normalizeVote(vote) {
+  if (!vote) return null;
+  const sim = Number(vote.sim) || 0;
+  const nao = Number(vote.nao) || 0;
+  const approved = vote.status === "APROVADA";
+  return {
+    ...vote,
+    sim,
+    nao,
+    maioria: APPROVAL_VOTES_REQUIRED,
+    faltamParaAprovar: approved ? 0 : Math.max(0, APPROVAL_VOTES_REQUIRED - sim),
+    votantes: Array.isArray(vote.votantes) ? vote.votantes : []
+  };
 }
 
 function render() {
@@ -359,8 +375,10 @@ function renderVote() {
     return;
   }
   const cast = vote.sim + vote.nao;
+  const isApproved = vote.status === 'APROVADA';
   const energyScore = Math.max(0, vote.sim - vote.nao);
-  const energyLevel = vote.maioria ? Math.min(100, Math.round(energyScore / vote.maioria * 100)) : 0;
+  const energyLevel = isApproved ? 100 : Math.min(100, Math.round(energyScore / APPROVAL_VOTES_REQUIRED * 100));
+  const energyLabel = isApproved ? `${vote.sim} votos sim · aprovada` : `${energyScore} de ${APPROVAL_VOTES_REQUIRED} cargas`;
   const energyState = energyLevel === 0 ? "empty" : energyLevel >= 100 ? "full" : energyLevel >= 50 ? "half" : "low";
   const previousLevel = lastEnergyLevel === null ? energyLevel : lastEnergyLevel;
   const sameVote = lastVoteState && lastVoteState.id === vote.id;
@@ -368,7 +386,6 @@ function renderVote() {
   const onlyNoChanged = sameVote && vote.nao > lastVoteState.nao && vote.sim === lastVoteState.sim;
   const energyDirection = onlyYesChanged ? "filling" : onlyNoChanged ? "draining" : energyLevel > previousLevel ? "filling" : energyLevel < previousLevel ? "draining" : "steady";
   
-  const isApproved = vote.status === 'APROVADA';
   const actionsHtml = isApproved 
     ? '<div class="status-pill green" style="width: 100%; justify-content: center; padding: 12px; margin-top: 16px;"><i data-lucide="check-circle"></i>Votação finalizada. Aguardando pagamento...</div>'
     : (admin ? '<button id="voteFinishInline" class="button secondary">Finalizar agora</button>' : vote.meuVoto ? `<span class="status-pill green">Seu voto: ${esc(vote.meuVoto.toUpperCase())}</span>` : '<div class="vote-actions"><button id="voteYes" class="button primary">Votar sim</button><button id="voteNo" class="button secondary">Votar não</button></div>');
@@ -377,7 +394,7 @@ function renderVote() {
     ? '<span class="status-pill green"><i data-lucide="check"></i>Aprovada</span>'
     : '<span id="countdown" class="countdown">--:--</span>';
 
-  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div>${countdownHtml}</div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyScore} de ${vote.maioria} cargas</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${actionsHtml}</div></article>`;
+  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div>${countdownHtml}</div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyLabel}</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${actionsHtml}</div></article>`;
   
   const bottle = container.querySelector('.energy-bottle'), liquid = container.querySelector('.energy-liquid');
   if (bottle && liquid && energyDirection !== "steady") {
