@@ -604,9 +604,15 @@ DECLARE
     v_maioria INT;
     v_resultado TEXT;
 BEGIN
-    SELECT * INTO v_vote_rec FROM votacoes WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 1;
+    -- O bloqueio impede que varios clientes finalizem e gerem pendencias duplicadas.
+    SELECT * INTO v_vote_rec
+    FROM votacoes
+    WHERE status = 'ABERTA'
+    ORDER BY criado_em DESC
+    LIMIT 1
+    FOR UPDATE;
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Nenhuma votação aberta para finalizar.';
+        RETURN fn_get_state('Admin');
     END IF;
 
     -- Chamadas automaticas nunca podem encerrar uma votacao antes do prazo.
@@ -629,7 +635,14 @@ BEGIN
 
     IF v_resultado = 'APROVADA' THEN
         INSERT INTO pendencias (tipo, origem, observacao, status)
-        VALUES ('Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE');
+        SELECT 'Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM pendencias
+            WHERE origem = 'votacao'
+              AND observacao IS NOT DISTINCT FROM v_vote_rec.motivo
+              AND status IN ('PENDENTE', 'CONFIRMADO')
+              AND criado_em >= v_vote_rec.criado_em
+        );
 
         INSERT INTO historico (tipo, texto, ator)
         VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi APROVADA (' || v_sim_count || ' a ' || v_nao_count || '). Pagamento gerado.', 'Admin');
@@ -655,6 +668,19 @@ BEGIN
     RETURN fn_finish_vote_internal(TRUE);
 END;
 $$ LANGUAGE plpgsql VOLATILE;
+
+-- Cancela apenas sobras pendentes que possuem uma copia identica ja confirmada.
+UPDATE pendencias p
+SET status = 'CANCELADO'
+WHERE p.status = 'PENDENTE'
+  AND p.origem = 'votacao'
+  AND EXISTS (
+      SELECT 1 FROM pendencias c
+      WHERE c.status = 'CONFIRMADO'
+        AND c.origem = p.origem
+        AND c.observacao IS NOT DISTINCT FROM p.observacao
+        AND c.criado_em = p.criado_em
+  );
 
 CREATE OR REPLACE FUNCTION fn_cancel_vote(p_admin_nome TEXT) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE

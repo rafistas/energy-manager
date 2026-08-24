@@ -117,10 +117,11 @@ BEGIN
   FROM public.votacoes
   WHERE status = 'ABERTA'
   ORDER BY criado_em DESC
-  LIMIT 1;
+  LIMIT 1
+  FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Nenhuma votação aberta para finalizar.';
+    RETURN public.fn_get_state('Admin');
   END IF;
 
   IF NOT p_force
@@ -146,7 +147,14 @@ BEGIN
 
   IF v_resultado = 'APROVADA' THEN
     INSERT INTO public.pendencias (tipo, origem, observacao, status)
-    VALUES ('Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE');
+    SELECT 'Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE'
+    WHERE NOT EXISTS (
+      SELECT 1 FROM public.pendencias
+      WHERE origem = 'votacao'
+        AND observacao IS NOT DISTINCT FROM v_vote_rec.motivo
+        AND status IN ('PENDENTE', 'CONFIRMADO')
+        AND criado_em >= v_vote_rec.criado_em
+    );
 
     INSERT INTO public.historico (tipo, texto, ator)
     VALUES (
@@ -188,6 +196,19 @@ BEGIN
   RETURN public.fn_finish_vote_internal(TRUE);
 END;
 $$;
+
+-- Remove o bloqueio visual causado por pendencias duplicadas ja pagas.
+UPDATE public.pendencias p
+SET status = 'CANCELADO'
+WHERE p.status = 'PENDENTE'
+  AND p.origem = 'votacao'
+  AND EXISTS (
+    SELECT 1 FROM public.pendencias c
+    WHERE c.status = 'CONFIRMADO'
+      AND c.origem = p.origem
+      AND c.observacao IS NOT DISTINCT FROM p.observacao
+      AND c.criado_em = p.criado_em
+  );
 
 -- Verificacao: deve retornar aproximadamente 600 segundos.
 SELECT EXTRACT(EPOCH FROM (
