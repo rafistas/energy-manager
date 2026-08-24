@@ -103,7 +103,7 @@ async function api(action, payload = {}) {
       rpcParams = { p_votacao_id: state.votacao.id, p_pessoa: session?.nome, p_voto: payload.voto };
       break;
     case "finishVote":
-      rpcName = "fn_finish_vote";
+      rpcName = "fn_finish_vote_admin";
       rpcParams = {};
       break;
     case "cancelVote":

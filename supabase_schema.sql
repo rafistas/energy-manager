@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS votacoes (
     criado_por TEXT
 );
 
+-- Reaplica o default em bancos criados por versoes anteriores do projeto.
+ALTER TABLE votacoes ALTER COLUMN criado_em SET DEFAULT clock_timestamp();
+
 CREATE TABLE IF NOT EXISTS votos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     votacao_id UUID REFERENCES votacoes(id) ON DELETE CASCADE,
@@ -171,8 +174,9 @@ BEGIN
     ORDER BY criado_em DESC LIMIT 1;
 
     IF FOUND THEN
-        -- Auto-finalizar se já passaram 15 minutos desde a criação
-        IF v_active_vote.status = 'ABERTA' AND v_active_vote.criado_em <= (now() - INTERVAL '15 minutes') THEN
+        -- A votação permanece aberta por até 10 minutos, independentemente da contagem.
+        IF v_active_vote.status = 'ABERTA'
+           AND clock_timestamp() >= (v_active_vote.criado_em + INTERVAL '10 minutes') THEN
             PERFORM fn_finish_vote();
             
             -- Tenta recuperar caso tenha sido aprovada e gerado pendência
@@ -202,7 +206,7 @@ BEGIN
                 SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
             END IF;
 
-            v_encerrar_em := to_char((v_active_vote.criado_em + INTERVAL '15 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS');
+            v_encerrar_em := to_char((v_active_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS');
 
             v_votacao := jsonb_build_object(
                 'id', v_active_vote.id,
@@ -211,7 +215,7 @@ BEGIN
                 'criadoPor', v_active_vote.criado_por,
                 'criadoEm', to_char(v_active_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
                 'encerraEm', v_encerrar_em,
-                'encerraEmIso', to_char((v_active_vote.criado_em + INTERVAL '15 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'encerraEmIso', to_char((v_active_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
                 'sim', v_sim_count,
                 'nao', v_nao_count,
                 'total', v_elegiveis_count,
@@ -482,8 +486,9 @@ BEGIN
 
     SELECT coalesce(jsonb_agg(nome), '[]'::jsonb) INTO v_elegiveis FROM pessoas WHERE ativo = TRUE;
 
-    INSERT INTO votacoes (motivo, criado_por, elegiveis, status)
-    VALUES (v_clean_motivo, p_criado_por, v_elegiveis, 'ABERTA');
+    -- Define o horario explicitamente para nao depender de defaults antigos da tabela.
+    INSERT INTO votacoes (motivo, criado_por, elegiveis, status, criado_em)
+    VALUES (v_clean_motivo, p_criado_por, v_elegiveis, 'ABERTA', clock_timestamp());
 
     INSERT INTO historico (tipo, texto, ator)
     VALUES ('votacao', p_criado_por || ' abriu a votação: ' || v_clean_motivo, p_criado_por);
@@ -502,7 +507,7 @@ BEGIN
         RAISE EXCEPTION 'Votação não está mais aberta.';
     END IF;
 
-    IF v_vote_rec.criado_em <= (now() - INTERVAL '15 minutes') THEN
+    IF clock_timestamp() >= (v_vote_rec.criado_em + INTERVAL '10 minutes') THEN
         PERFORM fn_finish_vote();
         RAISE EXCEPTION 'Votação expirou e foi encerrada.';
     END IF;
@@ -514,17 +519,11 @@ BEGIN
     INSERT INTO historico (tipo, texto, ator)
     VALUES ('votacao', p_pessoa || ' votou ' || upper(trim(p_voto)) || ' na votação: ' || v_vote_rec.motivo, p_pessoa);
 
-    -- Se atingiu 4 votos SIM, finaliza e aprova automaticamente
-    SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = p_votacao_id AND voto = 'sim';
-    IF v_sim_count >= 4 THEN
-        PERFORM fn_finish_vote();
-    END IF;
-
     RETURN fn_get_state(p_pessoa);
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
-CREATE OR REPLACE FUNCTION fn_finish_vote() RETURNS JSONB SECURITY DEFINER AS $$
+CREATE OR REPLACE FUNCTION fn_finish_vote_internal(p_force BOOLEAN DEFAULT FALSE) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_vote_rec RECORD;
     v_sim_count INT;
@@ -536,6 +535,11 @@ BEGIN
     SELECT * INTO v_vote_rec FROM votacoes WHERE status = 'ABERTA' ORDER BY criado_em DESC LIMIT 1;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Nenhuma votação aberta para finalizar.';
+    END IF;
+
+    -- Chamadas automaticas nunca podem encerrar uma votacao antes do prazo.
+    IF NOT p_force AND clock_timestamp() < (v_vote_rec.criado_em + INTERVAL '10 minutes') THEN
+        RETURN fn_get_state('Admin');
     END IF;
 
     SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'sim';
@@ -563,6 +567,20 @@ BEGIN
     END IF;
 
     RETURN fn_get_state('Admin');
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- Usada por rotinas automaticas e chamadas legadas. Possui protecao de tempo.
+CREATE OR REPLACE FUNCTION fn_finish_vote() RETURNS JSONB SECURITY DEFINER AS $$
+BEGIN
+    RETURN fn_finish_vote_internal(FALSE);
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- Usada exclusivamente pelo comando manual do administrador.
+CREATE OR REPLACE FUNCTION fn_finish_vote_admin() RETURNS JSONB SECURITY DEFINER AS $$
+BEGIN
+    RETURN fn_finish_vote_internal(TRUE);
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
