@@ -795,6 +795,53 @@ html[data-theme="dark"] .spotlight .button.dark { background: #0f172a; color: #f
 .calendar-count { position: absolute; right: 8px; bottom: 8px; min-width: 22px; height: 22px; padding: 0 6px; display: grid; place-items: center; border-radius: 999px; background: #0f172a; color: var(--brand); border: 1px solid var(--brand-glow); font-size: 11px; font-weight: 800; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); }
 .calendar-day.has-purchase:hover { background: var(--brand-soft); }
 .calendar-day.has-purchase:hover .calendar-bottle { transform: translate(-50%, -46%) scale(1.1); }
+.calendar-day.clickable { cursor: pointer; }
+.calendar-day.clickable:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--brand); }
+
+/* Detalhes do dia (modal do calendario) */
+.day-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.day-summary div { padding: 16px 18px; border-right: 1px solid var(--line); }
+.day-summary div:last-child { border-right: 0; }
+.day-summary strong { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.15; }
+.day-summary span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.day-list { display: grid; gap: 10px; max-height: 46vh; overflow-y: auto; }
+.day-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.day-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.day-avatar {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  border: 1px solid var(--line);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 800;
+}
+.day-time { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+
+@media (max-width: 480px) {
+  .day-summary { grid-template-columns: 1fr; }
+  .day-summary div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .day-summary div:last-child { border-bottom: 0; }
+}
 
 /* Responsive Adjustments */
 @media (max-width: 768px) {
