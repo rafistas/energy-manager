@@ -23,6 +23,16 @@ let session = readSession(),
     lastVoteState = null;
 
 const $ = id => document.getElementById(id);
+const normalizeQuantity = value => (Number(value) === 2 ? 2 : 1);
+const energyWord = quantidade => (quantidade > 1 ? `${quantidade} energéticos` : "1 energético");
+// Os N primeiros da fila que não estão pausados: são eles que pagam.
+const nextPayers = (count = 1) => state.pessoas.filter(person => !person.pausado).slice(0, Math.max(1, count)).map(person => person.nome);
+const joinNames = names => (names.length > 1 ? `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}` : names[0] || "");
+const pendingInfo = pending => {
+  const quantidade = normalizeQuantity(pending?.quantidade);
+  const confirmados = Math.max(0, Number(pending?.confirmados) || 0);
+  return { quantidade, confirmados, restantes: Math.max(1, quantidade - confirmados) };
+};
 const esc = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const icons = () => globalThis.lucide?.createIcons();
 
@@ -96,7 +106,7 @@ async function api(action, payload = {}) {
       break;
     case "createVote":
       rpcName = "fn_create_vote";
-      rpcParams = { p_motivo: payload.motivo || "Compra extra", p_criado_por: session?.nome || "Admin" };
+      rpcParams = { p_motivo: payload.motivo || "Compra extra", p_criado_por: session?.nome || "Admin", p_quantidade: normalizeQuantity(payload.quantidade) };
       break;
     case "castVote":
       if (!state.votacao?.id) throw new Error("Nenhuma votação aberta.");
@@ -306,6 +316,7 @@ function normalizeVote(vote) {
     ...vote,
     sim,
     nao,
+    quantidade: normalizeQuantity(vote.quantidade),
     maioria: APPROVAL_VOTES_REQUIRED,
     faltamParaAprovar: approved ? 0 : Math.max(0, APPROVAL_VOTES_REQUIRED - sim),
     votantes: Array.isArray(vote.votantes) ? vote.votantes : []
@@ -327,15 +338,25 @@ function render() {
 }
 
 function renderSpotlight() {
-  const pending = state.pagamentoPendente, next = state.pessoas.find(person => !person.pausado);
-  $('nextPayer').textContent = next?.nome || "Fila vazia";
-  $('spotlightKicker').textContent = pending ? "Pagamento pendente" : "Próximo a pagar";
-  $('spotlightText').textContent = pending ? `${pending.tipo}${pending.observacao ? ` · ${pending.observacao}` : ""}` : "Fila pronta para a próxima compra.";
+  const pending = state.pagamentoPendente;
+  const { quantidade, confirmados, restantes } = pendingInfo(pending);
+  // Com pendência de 2 energéticos os dois próximos da fila aparecem juntos.
+  const payers = nextPayers(pending ? restantes : 1);
+  $('nextPayer').textContent = joinNames(payers) || "Fila vazia";
+  $('spotlightKicker').textContent = pending
+    ? (quantidade > 1 ? `Pagamento pendente · ${energyWord(quantidade)}` : "Pagamento pendente")
+    : "Próximo a pagar";
+  $('spotlightText').textContent = pending
+    ? `${pending.tipo}${pending.observacao ? ` · ${pending.observacao}` : ""}${quantidade > 1 ? ` · ${confirmados} de ${quantidade} pagamentos confirmados` : ""}`
+    : "Fila pronta para a próxima compra.";
   const action = $('spotlightAction');
   const isAdmin = session?.tipo === "admin";
   action.classList.toggle('hidden', !isAdmin);
   if (isAdmin) {
-    action.innerHTML = `<i data-lucide="circle-check"></i>${pending ? "Confirmar pagamento" : `Registrar compra (${esc(next?.nome || "Próximo")})`}`;
+    const label = pending
+      ? (quantidade > 1 ? `Confirmar pagamento ${confirmados + 1} de ${quantidade} (${esc(payers[0] || "Próximo")})` : "Confirmar pagamento")
+      : `Registrar compra (${esc(payers[0] || "Próximo")})`;
+    action.innerHTML = `<i data-lucide="circle-check"></i>${label}`;
     action.onclick = openPaymentModal;
   }
 }
@@ -376,6 +397,16 @@ function renderVote() {
   }
   const cast = vote.sim + vote.nao;
   const isApproved = vote.status === 'APROVADA';
+  const quantidade = normalizeQuantity(vote.quantidade);
+  // Depois de aprovada a pendência diz quantos pagamentos ainda faltam.
+  const pendingVote = isApproved ? state.pagamentoPendente : null;
+  const restantes = pendingVote ? pendingInfo(pendingVote).restantes : quantidade;
+  const payers = nextPayers(restantes);
+  const payersLabel = !payers.length
+    ? "Fila vazia"
+    : isApproved
+      ? `${restantes > 1 ? "Faltam pagar" : "Falta pagar"}: ${joinNames(payers)}`
+      : `Se aprovada, ${restantes > 1 ? "pagam" : "paga"}: ${joinNames(payers)}`;
   const energyScore = Math.max(0, vote.sim - vote.nao);
   const energyLevel = isApproved ? 100 : Math.min(100, Math.round(energyScore / APPROVAL_VOTES_REQUIRED * 100));
   const energyLabel = isApproved ? `${vote.sim} votos sim · aprovada` : `${energyScore} de ${APPROVAL_VOTES_REQUIRED} cargas`;
@@ -387,14 +418,14 @@ function renderVote() {
   const energyDirection = onlyYesChanged ? "filling" : onlyNoChanged ? "draining" : energyLevel > previousLevel ? "filling" : energyLevel < previousLevel ? "draining" : "steady";
   
   const actionsHtml = isApproved 
-    ? '<div class="status-pill green" style="width: 100%; justify-content: center; padding: 12px; margin-top: 16px;"><i data-lucide="check-circle"></i>Votação finalizada. Aguardando pagamento...</div>'
+    ? `<div class="status-pill green" style="width: 100%; justify-content: center; padding: 12px; margin-top: 16px;"><i data-lucide="check-circle"></i>Votação finalizada. Aguardando pagamento de ${esc(joinNames(payers) || "quem estiver na fila")}...</div>`
     : (admin ? '<button id="voteFinishInline" class="button secondary">Finalizar agora</button>' : vote.meuVoto ? `<span class="status-pill green">Seu voto: ${esc(vote.meuVoto.toUpperCase())}</span>` : '<div class="vote-actions"><button id="voteYes" class="button primary">Votar sim</button><button id="voteNo" class="button secondary">Votar não</button></div>');
     
   const countdownHtml = isApproved
     ? '<span class="status-pill green"><i data-lucide="check"></i>Aprovada</span>'
     : '<span id="countdown" class="countdown">--:--</span>';
 
-  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div>${countdownHtml}</div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyLabel}</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${actionsHtml}</div></article>`;
+  container.innerHTML = `<article class="vote-card"><div class="vote-head"><div><p class="eyebrow">Motivo da votação</p><h3>${esc(vote.motivo)}</h3><div class="vote-quantity"><span class="status-pill amber"><i data-lucide="zap"></i>${esc(energyWord(quantidade))}</span><span class="optional">${esc(payersLabel)}</span></div><small>Criada por ${esc(vote.criadoPor || "participante")} · ${cast} de ${vote.total} participantes votaram</small></div>${countdownHtml}</div><div class="vote-stats"><div class="vote-stat"><strong>${vote.sim}</strong><span>Votos sim</span></div><div class="vote-stat"><strong>${vote.nao}</strong><span>Votos não</span></div><div class="vote-stat"><strong>${vote.faltamParaAprovar}</strong><span>Faltam para aprovar</span></div></div><div class="energy-gauge"><div class="energy-bottle ${energyState}" role="img" aria-label="Nível de energia em ${energyLevel} por cento"><span class="bottle-cap"></span><span class="bottle-neck"></span><span class="bottle-body"><span class="energy-liquid" style="height:${energyLevel}%"><i></i><i></i><i></i></span><span class="bottle-mark"><i data-lucide="zap"></i></span></span></div><div class="energy-gauge-copy"><p class="eyebrow">Energia da votação</p><strong>${energyLevel}%</strong><span>${energyLabel}</span><small>Sim enche, não esvazia</small></div></div><div class="vote-body"><p class="eyebrow">Já votaram</p><div class="voter-chips">${vote.votantes.length ? vote.votantes.map(name => `<span class="voter-chip">${esc(name)}</span>`).join("") : "<span class='optional'>Nenhum voto ainda</span>"}</div>${actionsHtml}</div></article>`;
   
   const bottle = container.querySelector('.energy-bottle'), liquid = container.querySelector('.energy-liquid');
   if (bottle && liquid && energyDirection !== "steady") {
@@ -661,20 +692,51 @@ function openAddPerson() {
 }
 
 function openVoteModal() {
-  openModal("Votação", "Nova compra extra", '<div class="field"><label for="voteReason">Motivo</label><input id="voteReason" maxlength="100" placeholder="Ex.: reposição para a reunião"></div>', '<button type="button" class="button secondary" data-modal-close>Cancelar</button><button id="saveVoteBtn" type="button" class="button dark">Abrir votação</button>');
+  const body = '<div class="field"><label for="voteReason">Motivo</label><input id="voteReason" maxlength="100" placeholder="Ex.: reposição para a reunião"></div>'
+    + '<div class="field"><label>Quantos energéticos?</label><div id="voteQuantity" class="segmented compact" role="group" aria-label="Quantidade de energéticos"><button type="button" class="segment active" data-quantity="1">1 energético</button><button type="button" class="segment" data-quantity="2">2 energéticos</button></div><small id="voteQuantityHint" class="optional"></small></div>';
+  openModal("Votação", "Nova compra extra", body, '<button type="button" class="button secondary" data-modal-close>Cancelar</button><button id="saveVoteBtn" type="button" class="button dark">Abrir votação</button>');
+
+  let quantidade = 1;
+  const group = $('voteQuantity'), hint = $('voteQuantityHint');
+  const updateHint = () => {
+    const payers = nextPayers(quantidade);
+    const nomes = payers.length ? `: ${joinNames(payers)}` : ".";
+    hint.textContent = quantidade > 1
+      ? `Se aprovada, os dois próximos da fila pagam${nomes}`
+      : `Se aprovada, apenas o próximo da fila paga${nomes}`;
+  };
+  group.querySelectorAll('[data-quantity]').forEach(option => option.onclick = () => {
+    quantidade = normalizeQuantity(option.dataset.quantity);
+    group.querySelectorAll('[data-quantity]').forEach(item => item.classList.toggle('active', item === option));
+    updateHint();
+  });
+  updateHint();
+
   const button = $('saveVoteBtn');
-  button.onclick = () => execute("createVote", { motivo: $('voteReason').value.trim() || "Compra extra" }, "Votação aberta.", button);
+  button.onclick = () => execute("createVote", { motivo: $('voteReason').value.trim() || "Compra extra", quantidade }, "Votação aberta.", button);
   bindModalClose();
   $('voteReason').focus();
 }
 
 function openPaymentModal() {
   const pending = state.pagamentoPendente;
-  const nextPayer = state.pessoas.find(person => !person.pausado)?.nome || "Próximo";
-  const title = pending ? "Confirmar pagamento pendente" : `Registrar compra (${nextPayer})`;
-  const text = pending 
-    ? `Confirmar pagamento no valor fixo de R$ 17,50 (${pending.tipo})? A fila irá avançar.` 
-    : `Confirmar a compra de energético para ${nextPayer} no valor fixo de R$ 17,50? A fila irá avançar.`;
+  const { quantidade, confirmados, restantes } = pendingInfo(pending);
+  const nextPayer = nextPayers(1)[0] || "Próximo";
+  let title, text;
+
+  if (!pending) {
+    title = `Registrar compra (${nextPayer})`;
+    text = `Confirmar a compra de energético para ${nextPayer} no valor fixo de R$ 17,50? A fila irá avançar.`;
+  } else if (quantidade > 1) {
+    // Cada pagamento é confirmado separadamente até fechar a quantidade aprovada.
+    title = `Confirmar pagamento ${confirmados + 1} de ${quantidade}`;
+    text = `Confirmar o pagamento de ${nextPayer} no valor fixo de R$ 17,50 (${pending.tipo})? `
+      + (restantes > 1 ? `Depois dele ainda falta ${restantes - 1} pagamento para fechar os ${quantidade} energéticos.` : "É o último pagamento desta votação.")
+      + " A fila irá avançar.";
+  } else {
+    title = "Confirmar pagamento pendente";
+    text = `Confirmar pagamento no valor fixo de R$ 17,50 (${pending.tipo})? A fila irá avançar.`;
+  }
 
   confirmAction(title, text, button => execute("registerPurchase", { valor: "17.50", metodo: "PIX" }, "Compra registrada.", button));
 }
