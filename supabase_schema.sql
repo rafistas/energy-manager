@@ -751,6 +751,10 @@ DECLARE
     v_restantes INT := 0;
     v_texto TEXT;
 BEGIN
+    -- Serializa as confirmacoes. Sem isso dois admins confirmando ao mesmo tempo
+    -- leem a fila antes da rotacao e cobram a mesma pessoa duas vezes.
+    PERFORM pg_advisory_xact_lock(hashtext('energy_manager_confirmar_pagamento')::bigint);
+
     -- Seleciona a próxima pessoa da fila (não pausada)
     SELECT * INTO v_next_person FROM pessoas WHERE ativo = TRUE AND pausado = FALSE ORDER BY ordem ASC LIMIT 1;
     IF NOT FOUND THEN

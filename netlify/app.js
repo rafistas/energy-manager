@@ -635,8 +635,10 @@ function renderHistory() {
 function renderAdmin() {
   const select = $('nextSelect');
   select.innerHTML = state.pessoas.filter(person => !person.pausado).map(person => `<option value="${esc(person.nome)}">${esc(person.nome)}</option>`).join("");
-  $('finishVoteBtn').disabled = !state.votacao;
-  $('cancelVoteBtn').disabled = !state.votacao;
+  // Uma votacao ja aprovada so espera pagamento: finalizar/cancelar nao fazem nada.
+  const votacaoAberta = !!state.votacao && state.votacao.status !== "APROVADA";
+  $('finishVoteBtn').disabled = !votacaoAberta;
+  $('cancelVoteBtn').disabled = !votacaoAberta;
 }
 
 async function execute(action, payload, message, button) {
