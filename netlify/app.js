@@ -33,6 +33,8 @@ const pendingInfo = pending => {
   const confirmados = Math.max(0, Number(pending?.confirmados) || 0);
   return { quantidade, confirmados, restantes: Math.max(1, quantidade - confirmados) };
 };
+const money = value => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value) || 0);
+const number = value => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(Number(value) || 0);
 const esc = value => String(value ?? "").replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
 const icons = () => globalThis.lucide?.createIcons();
 
@@ -514,9 +516,7 @@ function renderPurchaseStats() {
   const people = Object.keys(counts).map(nome => ({ nome, quantidade: counts[nome] })).sort((a, b) => b.quantidade - a.quantidade || a.nome.localeCompare(b.nome));
   const max = Math.max(1, ...people.map(item => item.quantidade));
   const unitPrice = Number(stats.precoUnitario) || 17.5, unitLiters = Number(stats.litrosPorUnidade) || 2;
-  const money = value => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value) || 0);
-  const number = value => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(Number(value) || 0);
-  
+
   container.innerHTML = `<div class="purchase-metrics"><div class="purchase-metric"><span class="metric-icon"><i data-lucide="package-check"></i></span><div><small>Energéticos comprados</small><strong>${quantity}</strong></div></div><div class="purchase-metric"><span class="metric-icon money"><i data-lucide="wallet-cards"></i></span><div><small>Valor total</small><strong>${money(quantity * unitPrice)}</strong><span>${money(unitPrice)} por unidade</span></div></div><div class="purchase-metric"><span class="metric-icon volume"><i data-lucide="droplets"></i></span><div><small>Volume total</small><strong>${number(quantity * unitLiters)} L</strong><span>${number(unitLiters)} L por unidade</span></div></div></div><div class="purchase-chart"><div class="chart-heading"><div><p class="eyebrow">Compras por participante</p><h3>Distribuição</h3></div><select id="purchasePeriodFilter" class="period-filter" aria-label="Período do gráfico"><option value="all">Todo o período</option><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="month">Este mês</option><option value="year">Este ano</option></select></div><div class="chart-total">${quantity} unidades no período</div><div class="chart-bars">${people.length ? people.map(item => `<div class="chart-row"><span title="${esc(item.nome)}">${esc(item.nome)}</span><div class="chart-track"><i style="width:${Math.max(6, Math.round(item.quantidade / max * 100))}%"></i></div><strong>${item.quantidade}</strong></div>`).join("") : '<div class="chart-empty">Nenhuma compra neste período.</div>'}</div></div>`;
   
   const filter = $('purchasePeriodFilter'); filter.value = purchasePeriod;
@@ -577,15 +577,14 @@ function renderPurchaseCalendar() {
     }
 
     let tooltip = "";
-    let clickHandler = "";
+    let dayAttrs = "";
     if (amount > 0 && dailyBuyers[dateStr]) {
-      const buyersStr = dailyBuyers[dateStr].join(", ");
-      const msg = `Compraram no dia ${String(day).padStart(2, '0')}: ${buyersStr}`;
-      tooltip = ` title="${msg}"`;
-      clickHandler = ` onclick="alert('${msg}')" style="cursor: pointer;"`;
+      classes.push("clickable");
+      tooltip = ` title="Compraram: ${esc(dailyBuyers[dateStr].join(", "))}"`;
+      dayAttrs = ` data-day="${dateStr}" role="button" tabindex="0" aria-label="Ver detalhes do dia ${day}"`;
     }
 
-    gridHtml += `<div class="${classes.join(" ")}"${tooltip}${clickHandler}><span class="calendar-number">${day}</span>${bottleHtml}${countHtml}</div>`;
+    gridHtml += `<div class="${classes.join(" ")}"${tooltip}${dayAttrs}><span class="calendar-number">${day}</span>${bottleHtml}${countHtml}</div>`;
   }
 
   container.innerHTML = `
@@ -618,6 +617,14 @@ function renderPurchaseCalendar() {
     </div>
   `;
 
+  container.querySelectorAll('[data-day]').forEach(cell => {
+    cell.onclick = () => openPurchaseDayModal(cell.dataset.day);
+    cell.onkeydown = event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openPurchaseDayModal(cell.dataset.day);
+    };
+  });
   $('prevMonthBtn').onclick = () => { purchaseCalendarDate.setMonth(purchaseCalendarDate.getMonth() - 1); renderPurchaseCalendar(); };
   $('nextMonthBtn').onclick = () => { purchaseCalendarDate.setMonth(purchaseCalendarDate.getMonth() + 1); renderPurchaseCalendar(); };
   $('todayMonthBtn').onclick = () => { purchaseCalendarDate = new Date(today.getFullYear(), today.getMonth(), 1); renderPurchaseCalendar(); };
@@ -679,6 +686,50 @@ function bindModalClose() { document.querySelectorAll('[data-modal-close]').forE
 
 function showAccessCode(name, code) {
   openModal("Primeiro acesso", `Código de ${name}`, `<div class="code-box"><span>Código temporário</span><strong>${esc(code)}</strong></div><p class="confirm-copy">Informe este código ao participante. Ele será usado apenas ao cadastrar a nova senha.</p>`, `<button type="button" class="button dark" data-modal-close>Concluir</button>`);
+  bindModalClose();
+}
+
+function openPurchaseDayModal(dateKey) {
+  const date = parseDateKey(dateKey);
+  const records = purchaseRecords().filter(record => record.data === dateKey);
+  if (!date || !records.length) return;
+
+  const stats = state.meta.compras || {};
+  const unitPrice = Number(stats.precoUnitario) || 17.5;
+  const unitLiters = Number(stats.litrosPorUnidade) || 2;
+  const units = records.reduce((total, record) => total + (Number(record.quantidade) || 1), 0);
+
+  // O histórico do mesmo dia complementa cada compra com horário, método e valor.
+  const dayPrefix = `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+  const events = state.historico.filter(item => (item.tipo === "pagamento" || item.tipo === "compra") && String(item.data).startsWith(dayPrefix));
+  const usedEvents = new Set();
+  const takeEvent = nome => {
+    const index = events.findIndex((item, position) => !usedEvents.has(position) && item.pagador === nome);
+    if (index === -1) return null;
+    usedEvents.add(index);
+    return events[index];
+  };
+
+  let totalValue = 0;
+  const rows = records.map(record => {
+    const amount = Number(record.quantidade) || 1;
+    const event = takeEvent(record.nome);
+    const value = Number(event?.detalhes?.valor) || unitPrice * amount;
+    totalValue += value;
+    const detail = [
+      `${amount} ${amount > 1 ? "unidades" : "unidade"}`,
+      money(value),
+      event?.detalhes?.metodo || null
+    ].filter(Boolean).join(" · ");
+    const time = String(event?.data || "").slice(11, 16);
+    return `<div class="day-row"><span class="day-avatar">${esc(record.nome.slice(0, 2).toUpperCase())}</span><div><div class="person-name">${esc(record.nome)}</div><small>${esc(detail)}</small></div><span class="day-time">${esc(time || "—")}</span></div>`;
+  });
+
+  const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(date);
+  const fullDate = new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", year: "numeric" }).format(date);
+  const body = `<div class="day-summary"><div><strong>${units}</strong><span>${units === 1 ? "energético" : "energéticos"}</span></div><div><strong>${esc(number(units * unitLiters))} L</strong><span>Volume</span></div><div><strong>${esc(money(totalValue))}</strong><span>Total do dia</span></div></div><div class="day-list">${rows.join("")}</div>`;
+
+  openModal(weekday.charAt(0).toUpperCase() + weekday.slice(1), fullDate, body, '<button type="button" class="button dark" data-modal-close>Fechar</button>');
   bindModalClose();
 }
 
