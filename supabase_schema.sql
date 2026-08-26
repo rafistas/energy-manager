@@ -43,11 +43,13 @@ CREATE TABLE IF NOT EXISTS votacoes (
     resultado TEXT,
     motivo TEXT NOT NULL,
     elegiveis JSONB DEFAULT '[]'::jsonb,
-    criado_por TEXT
+    criado_por TEXT,
+    quantidade INT NOT NULL DEFAULT 1 -- 1 ou 2 energeticos aprovados pela votacao
 );
 
 -- Reaplica o default em bancos criados por versoes anteriores do projeto.
 ALTER TABLE votacoes ALTER COLUMN criado_em SET DEFAULT clock_timestamp();
+ALTER TABLE votacoes ADD COLUMN IF NOT EXISTS quantidade INT NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS votos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,8 +72,14 @@ CREATE TABLE IF NOT EXISTS pendencias (
     valor NUMERIC(10, 2) DEFAULT 17.50,
     metodo TEXT,
     comprovante TEXT,
-    confirmado_por TEXT
+    confirmado_por TEXT,
+    quantidade INT NOT NULL DEFAULT 1,  -- quantos pagamentos essa pendencia exige
+    confirmados INT NOT NULL DEFAULT 0  -- quantos ja foram confirmados
 );
+
+-- Colunas adicionadas depois da versao inicial do projeto.
+ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS quantidade INT NOT NULL DEFAULT 1;
+ALTER TABLE pendencias ADD COLUMN IF NOT EXISTS confirmados INT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS movimentacoes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -106,6 +114,13 @@ ALTER PUBLICATION supabase_realtime ADD TABLE pessoas, historico, votacoes, voto
 CREATE OR REPLACE FUNCTION fn_hash(p_input TEXT) RETURNS TEXT SECURITY DEFINER AS $$
 BEGIN
     RETURN encode(digest(p_input, 'sha256'), 'hex');
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+-- Texto auxiliar para mensagens de 1 ou 2 energeticos.
+CREATE OR REPLACE FUNCTION fn_energetico_label(p_quantidade INT) RETURNS TEXT AS $$
+BEGIN
+    RETURN CASE WHEN coalesce(p_quantidade, 1) > 1 THEN ' energéticos' ELSE ' energético' END;
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
@@ -177,6 +192,7 @@ BEGIN
         'id', v_vote.id,
         'status', v_vote.status,
         'motivo', v_vote.motivo,
+        'quantidade', greatest(1, coalesce(v_vote.quantidade, 1)),
         'criadoPor', v_vote.criado_por,
         'criadoEm', to_char(v_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
         'encerraEm', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
@@ -284,6 +300,7 @@ BEGIN
                 'id', v_active_vote.id,
                 'status', v_active_vote.status,
                 'motivo', v_active_vote.motivo,
+                'quantidade', greatest(1, coalesce(v_active_vote.quantidade, 1)),
                 'criadoPor', v_active_vote.criado_por,
                 'criadoEm', to_char(v_active_vote.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS'),
                 'encerraEm', v_encerrar_em,
@@ -307,6 +324,9 @@ BEGIN
             'tipo', v_pending_rec.tipo,
             'observacao', v_pending_rec.observacao,
             'valor', v_pending_rec.valor,
+            'quantidade', greatest(1, coalesce(v_pending_rec.quantidade, 1)),
+            'confirmados', greatest(0, coalesce(v_pending_rec.confirmados, 0)),
+            'restantes', greatest(0, greatest(1, coalesce(v_pending_rec.quantidade, 1)) - coalesce(v_pending_rec.confirmados, 0)),
             'criadoEm', to_char(v_pending_rec.criado_em AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI:SS')
         );
     END IF;
@@ -541,14 +561,22 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- 7. OPERAÇÕES DE VOTAÇÃO
 
-CREATE OR REPLACE FUNCTION fn_create_vote(p_motivo TEXT, p_criado_por TEXT) RETURNS JSONB SECURITY DEFINER AS $$
+-- A assinatura antiga (sem quantidade) e removida para evitar ambiguidade no PostgREST.
+DROP FUNCTION IF EXISTS fn_create_vote(TEXT, TEXT);
+
+CREATE OR REPLACE FUNCTION fn_create_vote(p_motivo TEXT, p_criado_por TEXT, p_quantidade INT DEFAULT 1) RETURNS JSONB SECURITY DEFINER AS $$
 DECLARE
     v_clean_motivo TEXT := trim(p_motivo);
     v_open INT;
     v_elegiveis JSONB;
+    v_quantidade INT := coalesce(p_quantidade, 1);
 BEGIN
     IF v_clean_motivo = '' THEN
         RAISE EXCEPTION 'Digite o motivo da votação.';
+    END IF;
+
+    IF v_quantidade NOT IN (1, 2) THEN
+        RAISE EXCEPTION 'A votação deve ser de 1 ou 2 energéticos.';
     END IF;
 
     SELECT count(*) INTO v_open FROM votacoes WHERE status = 'ABERTA';
@@ -559,11 +587,11 @@ BEGIN
     SELECT coalesce(jsonb_agg(nome), '[]'::jsonb) INTO v_elegiveis FROM pessoas WHERE ativo = TRUE;
 
     -- Define o horario explicitamente para nao depender de defaults antigos da tabela.
-    INSERT INTO votacoes (motivo, criado_por, elegiveis, status, criado_em)
-    VALUES (v_clean_motivo, p_criado_por, v_elegiveis, 'ABERTA', clock_timestamp());
+    INSERT INTO votacoes (motivo, criado_por, elegiveis, status, criado_em, quantidade)
+    VALUES (v_clean_motivo, p_criado_por, v_elegiveis, 'ABERTA', clock_timestamp(), v_quantidade);
 
     INSERT INTO historico (tipo, texto, ator)
-    VALUES ('votacao', p_criado_por || ' abriu a votação: ' || v_clean_motivo, p_criado_por);
+    VALUES ('votacao', p_criado_por || ' abriu a votação de ' || v_quantidade || fn_energetico_label(v_quantidade) || ': ' || v_clean_motivo, p_criado_por);
 
     RETURN fn_get_state(p_criado_por);
 END;
@@ -603,6 +631,7 @@ DECLARE
     v_total_elegiveis INT;
     v_maioria INT;
     v_resultado TEXT;
+    v_quantidade INT := 1;
 BEGIN
     -- O bloqueio impede que varios clientes finalizem e gerem pendencias duplicadas.
     SELECT * INTO v_vote_rec
@@ -624,6 +653,7 @@ BEGIN
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'nao';
     v_total_elegiveis := jsonb_array_length(v_vote_rec.elegiveis);
     v_maioria := 4;
+    v_quantidade := greatest(1, coalesce(v_vote_rec.quantidade, 1));
 
     IF v_sim_count >= 4 OR v_sim_count >= v_maioria THEN
         v_resultado := 'APROVADA';
@@ -634,8 +664,9 @@ BEGIN
     UPDATE votacoes SET status = v_resultado, encerrado_em = now(), resultado = v_resultado WHERE id = v_vote_rec.id;
 
     IF v_resultado = 'APROVADA' THEN
-        INSERT INTO pendencias (tipo, origem, observacao, status)
-        SELECT 'Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE'
+        -- A pendencia guarda quantos pagamentos a votacao aprovou (1 ou 2).
+        INSERT INTO pendencias (tipo, origem, observacao, status, quantidade, confirmados)
+        SELECT 'Compra extra aprovada', 'votacao', v_vote_rec.motivo, 'PENDENTE', v_quantidade, 0
         WHERE NOT EXISTS (
             SELECT 1 FROM pendencias
             WHERE origem = 'votacao'
@@ -646,7 +677,7 @@ BEGIN
         ON CONFLICT DO NOTHING;
 
         INSERT INTO historico (tipo, texto, ator)
-        VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi APROVADA (' || v_sim_count || ' a ' || v_nao_count || '). Pagamento gerado.', 'Admin');
+        VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi APROVADA (' || v_sim_count || ' a ' || v_nao_count || '). Pagamento de ' || v_quantidade || fn_energetico_label(v_quantidade) || ' gerado.', 'Admin');
     ELSE
         INSERT INTO historico (tipo, texto, ator)
         VALUES ('votacao', 'Votação "' || v_vote_rec.motivo || '" foi REJEITADA (' || v_sim_count || ' a ' || v_nao_count || ').', 'Admin');
@@ -714,28 +745,47 @@ DECLARE
     v_pending RECORD;
     v_next_person RECORD;
     v_max_ordem INT;
+    v_quantidade INT := 1;
+    v_confirmados_antes INT := 0;
+    v_confirmados INT := 0;
+    v_restantes INT := 0;
+    v_texto TEXT;
 BEGIN
+    -- Serializa as confirmacoes. Sem isso dois admins confirmando ao mesmo tempo
+    -- leem a fila antes da rotacao e cobram a mesma pessoa duas vezes.
+    PERFORM pg_advisory_xact_lock(hashtext('energy_manager_confirmar_pagamento')::bigint);
+
     -- Seleciona a próxima pessoa da fila (não pausada)
     SELECT * INTO v_next_person FROM pessoas WHERE ativo = TRUE AND pausado = FALSE ORDER BY ordem ASC LIMIT 1;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Nenhum participante ativo e disponível na fila.';
     END IF;
 
-    -- Seleciona a pendência aberta
-    SELECT * INTO v_pending FROM pendencias WHERE status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 1;
+    -- Seleciona a pendência aberta. O bloqueio evita duas confirmações simultâneas.
+    SELECT * INTO v_pending FROM pendencias WHERE status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 1 FOR UPDATE;
+
+    IF v_pending.id IS NOT NULL THEN
+        v_quantidade := greatest(1, coalesce(v_pending.quantidade, 1));
+        v_confirmados_antes := greatest(0, coalesce(v_pending.confirmados, 0));
+    END IF;
 
     -- Salva movimentação para suporte a Undo
     INSERT INTO movimentacoes (tipo, pessoa, detalhes)
     VALUES ('compra', v_next_person.nome, jsonb_build_object(
         'ordemAnterior', v_next_person.ordem,
-        'pendenciaId', CASE WHEN v_pending.id IS NOT NULL THEN v_pending.id::text ELSE NULL END
+        'pendenciaId', CASE WHEN v_pending.id IS NOT NULL THEN v_pending.id::text ELSE NULL END,
+        'confirmadosAnterior', v_confirmados_antes
     ));
 
-    -- Atualiza a pendência se houver
+    -- Atualiza a pendência se houver. Com quantidade 2 ela só fecha no segundo pagamento.
     IF v_pending.id IS NOT NULL THEN
+        v_confirmados := v_confirmados_antes + 1;
+        v_restantes := greatest(0, v_quantidade - v_confirmados);
+
         UPDATE pendencias SET
-            status = 'CONFIRMADO',
-            confirmado_em = now(),
+            confirmados = v_confirmados,
+            status = CASE WHEN v_restantes = 0 THEN 'CONFIRMADO' ELSE 'PENDENTE' END,
+            confirmado_em = CASE WHEN v_restantes = 0 THEN now() ELSE NULL END,
             metodo = p_metodo,
             comprovante = p_comprovante,
             valor = p_valor,
@@ -751,13 +801,27 @@ BEGIN
     SELECT max(ordem) INTO v_max_ordem FROM pessoas WHERE ativo = TRUE;
     UPDATE pessoas SET ordem = v_max_ordem + 1 WHERE id = v_next_person.id;
 
+    IF v_quantidade > 1 THEN
+        v_texto := v_next_person.nome || ' realizou o pagamento ' || v_confirmados || ' de ' || v_quantidade
+                   || ' (R$ ' || p_valor::text || ') e foi para o final da fila.';
+    ELSE
+        v_texto := v_next_person.nome || ' realizou o pagamento do energético (R$ ' || p_valor::text || ') e foi para o final da fila.';
+    END IF;
+
     INSERT INTO historico (tipo, texto, pagador, ator, detalhes)
     VALUES (
         'pagamento',
-        v_next_person.nome || ' realizou o pagamento do energético (R$ ' || p_valor::text || ') e foi para o final da fila.',
+        v_texto,
         v_next_person.nome,
         p_confirmado_por,
-        jsonb_build_object('metodo', p_metodo, 'comprovante', p_comprovante, 'valor', p_valor)
+        jsonb_build_object(
+            'metodo', p_metodo,
+            'comprovante', p_comprovante,
+            'valor', p_valor,
+            'quantidade', v_quantidade,
+            'pagamento', v_confirmados,
+            'restantes', v_restantes
+        )
     );
 
     RETURN fn_get_state(p_confirmado_por);
@@ -826,9 +890,13 @@ BEGIN
         DELETE FROM compras WHERE id = v_compra.id;
     END IF;
 
-    -- Se tinha pendência vinculada, volta para PENDENTE
+    -- Se tinha pendência vinculada, volta para PENDENTE com o contador anterior
     IF v_mov.detalhes->>'pendenciaId' IS NOT NULL THEN
-        UPDATE pendencias SET status = 'PENDENTE', confirmado_em = NULL WHERE id = (v_mov.detalhes->>'pendenciaId')::uuid;
+        UPDATE pendencias SET
+            status = 'PENDENTE',
+            confirmado_em = NULL,
+            confirmados = greatest(0, coalesce((v_mov.detalhes->>'confirmadosAnterior')::int, 0))
+        WHERE id = (v_mov.detalhes->>'pendenciaId')::uuid;
     END IF;
 
     UPDATE movimentacoes SET desfeito = TRUE WHERE id = v_mov.id;

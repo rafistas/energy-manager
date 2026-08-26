@@ -7,7 +7,7 @@ Aplicação compartilhada para controlar a ordem de compras, pagamentos e votaç
 - **Sincronização em Tempo Real (WebSockets)**: Quando alguém vota, paga ou altera a fila, as telas de todos os participantes se atualizam **ao vivo** instantaneamente com indicador visual de conexão (`Ao vivo`, `Reconectando`, `Off-line`).
 - **Resposta Instantânea (< 100ms)**: Fim do atraso de carregamento e *cold start*.
 - **Controle de Fila**: Pausa temporária e escolha manual do próximo pagador.
-- **Votações Coletivas**: Maioria calculada e medidor dinâmico de energia com encerramento automático em 15 minutos.
+- **Votações Coletivas**: Maioria calculada e medidor dinâmico de energia com encerramento automático em 15 minutos. Ao abrir a votação escolhe-se **1 ou 2 energéticos**: com 1 apenas o próximo da fila paga, com 2 os dois próximos pagam (um pagamento confirmado de cada vez).
 - **Dashboard e Estatísticas**: Gráficos de compras por participante e calendário mensal de consumo.
 - **Segurança Avançada**:
   - Senhas de participantes criptografadas com `sha256` + `salt` único.
@@ -41,6 +41,15 @@ Publique os arquivos da pasta `netlify/` no Netlify:
 - `app.js`
 
 Pronto! A aplicação estará no ar rodando com tempo real e resposta ultra rápida.
+
+---
+
+## 🔁 Atualizacoes de schema
+
+Bancos criados antes de uma mudanca precisam rodar os scripts de migracao no **SQL Editor** do Supabase (uma vez cada):
+
+- [`fix_vote_immediate_finish.sql`](file:///c:/Projects/energy-manager/fix_vote_immediate_finish.sql) - corrige o horario de criacao das votacoes.
+- [`fix_vote_quantity.sql`](file:///c:/Projects/energy-manager/fix_vote_quantity.sql) - habilita a votacao de 1 ou 2 energeticos.
 
 ---
 
