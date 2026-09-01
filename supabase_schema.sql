@@ -124,6 +124,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
+-- Maioria simples proporcional ao numero de participantes elegiveis da votacao:
+-- metade + 1 (9 participantes -> 5 votos sim; 10 -> 6).
+CREATE OR REPLACE FUNCTION fn_vote_majority(p_total INT) RETURNS INT AS $$
+    SELECT greatest(1, floor(coalesce(p_total, 0) / 2.0)::int + 1);
+$$ LANGUAGE sql IMMUTABLE;
+
 CREATE OR REPLACE FUNCTION fn_generate_activation_code() RETURNS TEXT SECURITY DEFINER AS $$
 DECLARE
     v_code TEXT;
@@ -141,6 +147,8 @@ DECLARE
     v_vote_id UUID;
     v_sim_count INT;
     v_nao_count INT;
+    v_total INT;
+    v_maioria INT;
     v_voto_usuario TEXT := NULL;
     v_votantes JSONB;
 BEGIN
@@ -184,6 +192,9 @@ BEGIN
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote.id AND voto = 'nao';
     SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_vote.id;
 
+    v_total := coalesce(jsonb_array_length(v_vote.elegiveis), 0);
+    v_maioria := fn_vote_majority(v_total);
+
     IF p_session_person IS NOT NULL THEN
         SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_vote.id AND pessoa = p_session_person;
     END IF;
@@ -199,9 +210,9 @@ BEGIN
         'encerraEmIso', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
         'sim', v_sim_count,
         'nao', v_nao_count,
-        'total', coalesce(jsonb_array_length(v_vote.elegiveis), 0),
-        'maioria', 4,
-        'faltamParaAprovar', greatest(0, 4 - v_sim_count),
+        'total', v_total,
+        'maioria', v_maioria,
+        'faltamParaAprovar', greatest(0, v_maioria - v_sim_count),
         'meuVoto', v_voto_usuario,
         'votantes', v_votantes
     );
@@ -287,8 +298,8 @@ BEGIN
             SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'nao';
             SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
             
-            v_elegiveis_count := jsonb_array_length(v_active_vote.elegiveis);
-            v_maioria := 4;
+            v_elegiveis_count := coalesce(jsonb_array_length(v_active_vote.elegiveis), 0);
+            v_maioria := fn_vote_majority(v_elegiveis_count);
 
             IF p_session_person IS NOT NULL THEN
                 SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
@@ -336,6 +347,7 @@ BEGIN
     SELECT valor::numeric INTO v_unit_liters FROM configuracoes WHERE chave = 'unit_liters';
 
     SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'id', id,
         'data', to_char(data, 'YYYY-MM-DD'),
         'quantidade', quantidade,
         'nome', nome
@@ -651,11 +663,11 @@ BEGIN
 
     SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'sim';
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'nao';
-    v_total_elegiveis := jsonb_array_length(v_vote_rec.elegiveis);
-    v_maioria := 4;
+    v_total_elegiveis := coalesce(jsonb_array_length(v_vote_rec.elegiveis), 0);
+    v_maioria := fn_vote_majority(v_total_elegiveis);
     v_quantidade := greatest(1, coalesce(v_vote_rec.quantidade, 1));
 
-    IF v_sim_count >= 4 OR v_sim_count >= v_maioria THEN
+    IF v_sim_count >= v_maioria THEN
         v_resultado := 'APROVADA';
     ELSE
         v_resultado := 'REJEITADA';
@@ -905,6 +917,68 @@ BEGIN
     VALUES ('ajuste', 'A última compra de ' || v_mov.pessoa || ' foi desfeita por ' || p_admin_nome || '.', p_admin_nome);
 
     RETURN fn_get_state(p_admin_nome);
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- Ajuste administrativo: move um registro de compra para outro dia (correcao de data).
+CREATE OR REPLACE FUNCTION fn_update_purchase_date(p_id UUID, p_data DATE, p_ator TEXT DEFAULT 'Admin') RETURNS JSONB SECURITY DEFINER AS $$
+DECLARE
+    v_compra RECORD;
+    v_old_data DATE;
+    v_today DATE := (now() AT TIME ZONE 'America/Sao_Paulo')::date;
+    v_hist_id UUID;
+    v_match_count INT;
+BEGIN
+    IF p_data IS NULL THEN
+        RAISE EXCEPTION 'Escolha uma data válida.';
+    END IF;
+
+    IF p_data > v_today THEN
+        RAISE EXCEPTION 'A data não pode estar no futuro.';
+    END IF;
+
+    SELECT * INTO v_compra FROM compras WHERE id = p_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Compra não encontrada.';
+    END IF;
+
+    v_old_data := v_compra.data;
+    IF v_old_data IS NOT DISTINCT FROM p_data THEN
+        RETURN fn_get_state(p_ator);
+    END IF;
+
+    UPDATE compras SET data = p_data WHERE id = p_id;
+
+    -- Se houver exatamente um lancamento de pagamento/compra desse participante na
+    -- data antiga, desloca o horario dele junto para o card do dia continuar coerente.
+    SELECT count(*) INTO v_match_count
+    FROM historico
+    WHERE tipo IN ('pagamento', 'compra')
+      AND lower(pagador) = lower(v_compra.nome)
+      AND (data AT TIME ZONE 'America/Sao_Paulo')::date = v_old_data;
+
+    IF v_match_count = 1 THEN
+        SELECT id INTO v_hist_id
+        FROM historico
+        WHERE tipo IN ('pagamento', 'compra')
+          AND lower(pagador) = lower(v_compra.nome)
+          AND (data AT TIME ZONE 'America/Sao_Paulo')::date = v_old_data;
+
+        UPDATE historico
+        SET data = (p_data + (data AT TIME ZONE 'America/Sao_Paulo')::time) AT TIME ZONE 'America/Sao_Paulo'
+        WHERE id = v_hist_id;
+    END IF;
+
+    INSERT INTO historico (tipo, texto, pagador, ator)
+    VALUES (
+        'ajuste',
+        'A data da compra de ' || v_compra.nome || ' foi movida de '
+          || to_char(v_old_data, 'DD/MM/YYYY') || ' para ' || to_char(p_data, 'DD/MM/YYYY') || ' por ' || p_ator || '.',
+        v_compra.nome,
+        p_ator
+    );
+
+    RETURN fn_get_state(p_ator);
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
