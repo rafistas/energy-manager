@@ -124,6 +124,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
+-- Maioria simples proporcional ao numero de participantes elegiveis da votacao:
+-- metade + 1 (9 participantes -> 5 votos sim; 10 -> 6).
+CREATE OR REPLACE FUNCTION fn_vote_majority(p_total INT) RETURNS INT AS $$
+    SELECT greatest(1, floor(coalesce(p_total, 0) / 2.0)::int + 1);
+$$ LANGUAGE sql IMMUTABLE;
+
 CREATE OR REPLACE FUNCTION fn_generate_activation_code() RETURNS TEXT SECURITY DEFINER AS $$
 DECLARE
     v_code TEXT;
@@ -141,6 +147,8 @@ DECLARE
     v_vote_id UUID;
     v_sim_count INT;
     v_nao_count INT;
+    v_total INT;
+    v_maioria INT;
     v_voto_usuario TEXT := NULL;
     v_votantes JSONB;
 BEGIN
@@ -184,6 +192,9 @@ BEGIN
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote.id AND voto = 'nao';
     SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_vote.id;
 
+    v_total := coalesce(jsonb_array_length(v_vote.elegiveis), 0);
+    v_maioria := fn_vote_majority(v_total);
+
     IF p_session_person IS NOT NULL THEN
         SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_vote.id AND pessoa = p_session_person;
     END IF;
@@ -199,9 +210,9 @@ BEGIN
         'encerraEmIso', to_char((v_vote.criado_em + INTERVAL '10 minutes') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
         'sim', v_sim_count,
         'nao', v_nao_count,
-        'total', coalesce(jsonb_array_length(v_vote.elegiveis), 0),
-        'maioria', 4,
-        'faltamParaAprovar', greatest(0, 4 - v_sim_count),
+        'total', v_total,
+        'maioria', v_maioria,
+        'faltamParaAprovar', greatest(0, v_maioria - v_sim_count),
         'meuVoto', v_voto_usuario,
         'votantes', v_votantes
     );
@@ -287,8 +298,8 @@ BEGIN
             SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_active_vote.id AND voto = 'nao';
             SELECT coalesce(jsonb_agg(pessoa), '[]'::jsonb) INTO v_votantes FROM votos WHERE votacao_id = v_active_vote.id;
             
-            v_elegiveis_count := jsonb_array_length(v_active_vote.elegiveis);
-            v_maioria := 4;
+            v_elegiveis_count := coalesce(jsonb_array_length(v_active_vote.elegiveis), 0);
+            v_maioria := fn_vote_majority(v_elegiveis_count);
 
             IF p_session_person IS NOT NULL THEN
                 SELECT voto INTO v_voto_usuario FROM votos WHERE votacao_id = v_active_vote.id AND pessoa = p_session_person;
@@ -651,11 +662,11 @@ BEGIN
 
     SELECT count(*) INTO v_sim_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'sim';
     SELECT count(*) INTO v_nao_count FROM votos WHERE votacao_id = v_vote_rec.id AND voto = 'nao';
-    v_total_elegiveis := jsonb_array_length(v_vote_rec.elegiveis);
-    v_maioria := 4;
+    v_total_elegiveis := coalesce(jsonb_array_length(v_vote_rec.elegiveis), 0);
+    v_maioria := fn_vote_majority(v_total_elegiveis);
     v_quantidade := greatest(1, coalesce(v_vote_rec.quantidade, 1));
 
-    IF v_sim_count >= 4 OR v_sim_count >= v_maioria THEN
+    IF v_sim_count >= v_maioria THEN
         v_resultado := 'APROVADA';
     ELSE
         v_resultado := 'REJEITADA';

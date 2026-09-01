@@ -5,7 +5,12 @@ const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsI
 
 const SESSION_KEY = "energy_manager_session_v2";
 const THEME_KEY = "energy_manager_theme";
-const APPROVAL_VOTES_REQUIRED = 4;
+// Maioria simples proporcional aos participantes elegiveis: metade + 1
+// (9 participantes -> 5 votos sim; 10 -> 6). O backend envia `maioria`;
+// esta funcao e o fallback quando o valor nao vem no payload.
+function voteMajority(total) {
+  return Math.max(1, Math.floor((Number(total) || 0) / 2) + 1);
+}
 
 // Inicialização do cliente Supabase
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
@@ -314,13 +319,16 @@ function normalizeVote(vote) {
   const sim = Number(vote.sim) || 0;
   const nao = Number(vote.nao) || 0;
   const approved = vote.status === "APROVADA";
+  const total = Number(vote.total) || 0;
+  const maioria = Number(vote.maioria) > 0 ? Number(vote.maioria) : voteMajority(total);
   return {
     ...vote,
     sim,
     nao,
+    total,
     quantidade: normalizeQuantity(vote.quantidade),
-    maioria: APPROVAL_VOTES_REQUIRED,
-    faltamParaAprovar: approved ? 0 : Math.max(0, APPROVAL_VOTES_REQUIRED - sim),
+    maioria,
+    faltamParaAprovar: approved ? 0 : Math.max(0, maioria - sim),
     votantes: Array.isArray(vote.votantes) ? vote.votantes : []
   };
 }
@@ -410,8 +418,8 @@ function renderVote() {
       ? `${restantes > 1 ? "Faltam pagar" : "Falta pagar"}: ${joinNames(payers)}`
       : `Se aprovada, ${restantes > 1 ? "pagam" : "paga"}: ${joinNames(payers)}`;
   const energyScore = Math.max(0, vote.sim - vote.nao);
-  const energyLevel = isApproved ? 100 : Math.min(100, Math.round(energyScore / APPROVAL_VOTES_REQUIRED * 100));
-  const energyLabel = isApproved ? `${vote.sim} votos sim · aprovada` : `${energyScore} de ${APPROVAL_VOTES_REQUIRED} cargas`;
+  const energyLevel = isApproved ? 100 : Math.min(100, Math.round(energyScore / vote.maioria * 100));
+  const energyLabel = isApproved ? `${vote.sim} votos sim · aprovada` : `${energyScore} de ${vote.maioria} cargas`;
   const energyState = energyLevel === 0 ? "empty" : energyLevel >= 100 ? "full" : energyLevel >= 50 ? "half" : "low";
   const previousLevel = lastEnergyLevel === null ? energyLevel : lastEnergyLevel;
   const sameVote = lastVoteState && lastVoteState.id === vote.id;
