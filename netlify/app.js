@@ -141,6 +141,10 @@ async function api(action, payload = {}) {
       rpcName = "fn_undo_last_purchase";
       rpcParams = { p_admin_nome: session?.nome || "Admin" };
       break;
+    case "updatePurchaseDate":
+      rpcName = "fn_update_purchase_date";
+      rpcParams = { p_id: payload.id, p_data: payload.data, p_ator: session?.nome || "Admin" };
+      break;
     case "clearAll":
       rpcName = "fn_clear_all";
       rpcParams = {};
@@ -501,6 +505,7 @@ function finishVote() { confirmAction("Finalizar votação", "O resultado será 
 function cancelVote() { confirmAction("Cancelar votação", "A votação será encerrada sem resultado.", button => execute("cancelVote", {}, "Votação cancelada.", button), true); }
 
 function parseDateKey(value) { const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/); return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null; }
+function dateKey(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
 function purchaseRecords() { return state.meta.compras?.registros || []; }
 function filteredPurchaseRecords() {
   const records = purchaseRecords();
@@ -697,11 +702,13 @@ function showAccessCode(name, code) {
   bindModalClose();
 }
 
-function openPurchaseDayModal(dateKey) {
-  const date = parseDateKey(dateKey);
-  const records = purchaseRecords().filter(record => record.data === dateKey);
+function openPurchaseDayModal(dayKey) {
+  const date = parseDateKey(dayKey);
+  const records = purchaseRecords().filter(record => record.data === dayKey);
   if (!date || !records.length) return;
 
+  const admin = session?.tipo === "admin";
+  const todayKey = dateKey(new Date());
   const stats = state.meta.compras || {};
   const unitPrice = Number(stats.precoUnitario) || 17.5;
   const unitLiters = Number(stats.litrosPorUnidade) || 2;
@@ -730,7 +737,11 @@ function openPurchaseDayModal(dateKey) {
       event?.detalhes?.metodo || null
     ].filter(Boolean).join(" · ");
     const time = String(event?.data || "").slice(11, 16);
-    return `<div class="day-row"><span class="day-avatar">${esc(record.nome.slice(0, 2).toUpperCase())}</span><div><div class="person-name">${esc(record.nome)}</div><small>${esc(detail)}</small></div><span class="day-time">${esc(time || "—")}</span></div>`;
+    // Admin pode corrigir o dia da compra escolhendo outra data no seletor.
+    const editor = (admin && record.id)
+      ? `<div class="day-edit"><label>Mover para<input type="date" value="${esc(record.data)}" max="${esc(todayKey)}" data-purchase-id="${esc(record.id)}"></label><button type="button" class="button secondary day-move-btn" data-move-id="${esc(record.id)}" disabled>Mover</button></div>`
+      : "";
+    return `<div class="day-entry"><div class="day-row"><span class="day-avatar">${esc(record.nome.slice(0, 2).toUpperCase())}</span><div><div class="person-name">${esc(record.nome)}</div><small>${esc(detail)}</small></div><span class="day-time">${esc(time || "—")}</span></div>${editor}</div>`;
   });
 
   const weekday = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(date);
@@ -739,6 +750,38 @@ function openPurchaseDayModal(dateKey) {
 
   openModal(weekday.charAt(0).toUpperCase() + weekday.slice(1), fullDate, body, '<button type="button" class="button dark" data-modal-close>Fechar</button>');
   bindModalClose();
+
+  if (admin) {
+    $('modalBody').querySelectorAll('input[data-purchase-id]').forEach(input => {
+      const moveButton = $('modalBody').querySelector(`button[data-move-id="${CSS.escape(input.dataset.purchaseId)}"]`);
+      const sync = () => { if (moveButton) moveButton.disabled = !input.value || input.value === input.defaultValue; };
+      input.oninput = sync;
+      input.onchange = sync;
+      if (moveButton) moveButton.onclick = () => {
+        if (!input.value || input.value === input.defaultValue) return;
+        movePurchaseDate(input.dataset.purchaseId, input.value, dayKey, moveButton);
+      };
+    });
+  }
+}
+
+async function movePurchaseDate(id, novoDia, diaAtual, button) {
+  if (actionInFlight) return;
+  actionInFlight = true;
+  setActionLoading(button, true);
+  try {
+    const data = await api("updatePurchaseDate", { id, data: novoDia });
+    applyState(data);
+    toast("Data da compra atualizada.");
+    closeModal();
+    // Reabre o card já no dia de destino (ou no dia de origem se ainda houver compras lá).
+    openPurchaseDayModal(purchaseRecords().some(record => record.data === novoDia) ? novoDia : diaAtual);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    actionInFlight = false;
+    setActionLoading(button, false);
+  }
 }
 
 function openAddPerson() {

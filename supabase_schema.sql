@@ -347,6 +347,7 @@ BEGIN
     SELECT valor::numeric INTO v_unit_liters FROM configuracoes WHERE chave = 'unit_liters';
 
     SELECT coalesce(jsonb_agg(jsonb_build_object(
+        'id', id,
         'data', to_char(data, 'YYYY-MM-DD'),
         'quantidade', quantidade,
         'nome', nome
@@ -916,6 +917,68 @@ BEGIN
     VALUES ('ajuste', 'A última compra de ' || v_mov.pessoa || ' foi desfeita por ' || p_admin_nome || '.', p_admin_nome);
 
     RETURN fn_get_state(p_admin_nome);
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- Ajuste administrativo: move um registro de compra para outro dia (correcao de data).
+CREATE OR REPLACE FUNCTION fn_update_purchase_date(p_id UUID, p_data DATE, p_ator TEXT DEFAULT 'Admin') RETURNS JSONB SECURITY DEFINER AS $$
+DECLARE
+    v_compra RECORD;
+    v_old_data DATE;
+    v_today DATE := (now() AT TIME ZONE 'America/Sao_Paulo')::date;
+    v_hist_id UUID;
+    v_match_count INT;
+BEGIN
+    IF p_data IS NULL THEN
+        RAISE EXCEPTION 'Escolha uma data válida.';
+    END IF;
+
+    IF p_data > v_today THEN
+        RAISE EXCEPTION 'A data não pode estar no futuro.';
+    END IF;
+
+    SELECT * INTO v_compra FROM compras WHERE id = p_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Compra não encontrada.';
+    END IF;
+
+    v_old_data := v_compra.data;
+    IF v_old_data IS NOT DISTINCT FROM p_data THEN
+        RETURN fn_get_state(p_ator);
+    END IF;
+
+    UPDATE compras SET data = p_data WHERE id = p_id;
+
+    -- Se houver exatamente um lancamento de pagamento/compra desse participante na
+    -- data antiga, desloca o horario dele junto para o card do dia continuar coerente.
+    SELECT count(*) INTO v_match_count
+    FROM historico
+    WHERE tipo IN ('pagamento', 'compra')
+      AND lower(pagador) = lower(v_compra.nome)
+      AND (data AT TIME ZONE 'America/Sao_Paulo')::date = v_old_data;
+
+    IF v_match_count = 1 THEN
+        SELECT id INTO v_hist_id
+        FROM historico
+        WHERE tipo IN ('pagamento', 'compra')
+          AND lower(pagador) = lower(v_compra.nome)
+          AND (data AT TIME ZONE 'America/Sao_Paulo')::date = v_old_data;
+
+        UPDATE historico
+        SET data = (p_data + (data AT TIME ZONE 'America/Sao_Paulo')::time) AT TIME ZONE 'America/Sao_Paulo'
+        WHERE id = v_hist_id;
+    END IF;
+
+    INSERT INTO historico (tipo, texto, pagador, ator)
+    VALUES (
+        'ajuste',
+        'A data da compra de ' || v_compra.nome || ' foi movida de '
+          || to_char(v_old_data, 'DD/MM/YYYY') || ' para ' || to_char(p_data, 'DD/MM/YYYY') || ' por ' || p_ator || '.',
+        v_compra.nome,
+        p_ator
+    );
+
+    RETURN fn_get_state(p_ator);
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
