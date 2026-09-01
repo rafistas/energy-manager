@@ -7,8 +7,8 @@ Aplicação compartilhada para controlar a ordem de compras, pagamentos e votaç
 - **Sincronização em Tempo Real (WebSockets)**: Quando alguém vota, paga ou altera a fila, as telas de todos os participantes se atualizam **ao vivo** instantaneamente com indicador visual de conexão (`Ao vivo`, `Reconectando`, `Off-line`).
 - **Resposta Instantânea (< 100ms)**: Fim do atraso de carregamento e *cold start*.
 - **Controle de Fila**: Pausa temporária e escolha manual do próximo pagador.
-- **Votações Coletivas**: Maioria calculada e medidor dinâmico de energia com encerramento automático em 15 minutos. Ao abrir a votação escolhe-se **1 ou 2 energéticos**: com 1 apenas o próximo da fila paga, com 2 os dois próximos pagam (um pagamento confirmado de cada vez).
-- **Dashboard e Estatísticas**: Gráficos de compras por participante e calendário mensal de consumo.
+- **Votações Coletivas**: Maioria simples proporcional aos participantes (metade + 1 dos elegíveis; 9 participantes exigem 5 votos "sim", 10 exigem 6) e medidor dinâmico de energia com encerramento automático em 15 minutos. Ao abrir a votação escolhe-se **1 ou 2 energéticos**: com 1 apenas o próximo da fila paga, com 2 os dois próximos pagam (um pagamento confirmado de cada vez).
+- **Dashboard e Estatísticas**: Gráficos de compras por participante e calendário mensal de consumo. No card de um dia o admin pode corrigir a data de uma compra escolhendo outro dia.
 - **Segurança Avançada**:
   - Senhas de participantes criptografadas com `sha256` + `salt` único.
   - Senha de admin criptografada no banco.
@@ -50,6 +50,8 @@ Bancos criados antes de uma mudanca precisam rodar os scripts de migracao no **S
 
 - [`fix_vote_immediate_finish.sql`](file:///c:/Projects/energy-manager/fix_vote_immediate_finish.sql) - corrige o horario de criacao das votacoes.
 - [`fix_vote_quantity.sql`](file:///c:/Projects/energy-manager/fix_vote_quantity.sql) - habilita a votacao de 1 ou 2 energeticos.
+- [`fix_vote_proportional_majority.sql`](file:///c:/Projects/energy-manager/fix_vote_proportional_majority.sql) - maioria proporcional aos participantes (metade + 1) em vez de 4 votos fixos.
+- [`fix_purchase_date_edit.sql`](file:///c:/Projects/energy-manager/fix_purchase_date_edit.sql) - admin pode corrigir o dia de uma compra pelo card do calendario.
 
 ---
 
